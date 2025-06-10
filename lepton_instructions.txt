@@ -1,0 +1,24 @@
+1) open up the terminal and type:
+cd libuvc
+
+2) to run the data collection, type
+python readout.py 
+
+2a) if you get an error that says uvc_open_error, type and run: 
+sudo chmod -R 777 /dev/bus/usb/ 
+
+if it asks for a password, the password is on the post it. 
+
+try running line 4 again
+
+to kill the data collection, click the terminal and press Ctrl+C. 
+
+3) To view the data you just got type: 
+python binary_viewer.py
+
+4) The program will be set to overwrite whatever is in the file so make sure that you are either okay with that or set a new directory in the code. 
+
+5) To edit the python programs in vscode (e.g. change directory, type:
+code <name_of_file> 
+
+and change the output directories to avoid overwriting.
