@@ -131,7 +131,6 @@ class uvc_frame(Structure):
               #  * Set this field to zero if you are supplying the buffer.
               #  */
               ("library_owns_data", c_uint8)]
-
 class uvc_device_handle(Structure):
   _fields_ = [("dev", POINTER(uvc_device)),
               ("prev", c_void_p),
@@ -175,7 +174,8 @@ UVC_FRAME_FORMAT_UYVY = 4
 UVC_FRAME_FORMAT_I420 = 5
 UVC_FRAME_FORMAT_RGB = 7
 UVC_FRAME_FORMAT_BGR = 8
-UVC_FRAME_FORMAT_Y16 = 13
+# _FRAME_FORMAT_Y16 from 9 to 10 in uvctype.py, let alone uvc-radiometry.py will work it will also correctly read min and max temperatures.
+UVC_FRAME_FORMAT_Y16 = 10
 
 VS_FMT_GUID_GREY = create_string_buffer(
     b"Y8  \x00\x00\x10\x00\x80\x00\x00\xaa\x00\x38\x9b\x71", 16
