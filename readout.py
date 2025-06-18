@@ -67,7 +67,7 @@ def main():
     try:
         res = libuvc.uvc_find_device(ctx, byref(dev), PT_USB_VID, PT_USB_PID, 0)
         if res < 0:
-            print("uvc_find_device error")
+            print("uvc_find_device error - Couldn't find the device, is it plugged in? You should see a Cubeternet Webcam or something new once its plugged in.")
             exit(1)
 
         try:
@@ -84,7 +84,7 @@ def main():
 
             frame_formats = uvc_get_frame_formats_by_guid(devh, VS_FMT_GUID_Y16)
             if len(frame_formats) == 0:
-                print("device does not support Y16")
+                print("device does not support Y16 - we need this to read out the temperatures properly")
                 exit(1)
 
             libuvc.uvc_get_stream_ctrl_format_size(devh, byref(ctrl), UVC_FRAME_FORMAT_Y16,
