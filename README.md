@@ -1,32 +1,42 @@
-# FLIR Lepton USB Capture (Python + libuvc)
+# FLIR Lepton USB Capture Toolkit
 
-Tiny Python toolkit for streaming raw thermal frames from a **FLIR Lepton** camera over USB with **libuvc**.
-Primarily tested on Lepton 3/3.5 modules plugged into a UVC-compatible breakout board.
+Tiny Python toolkit for streaming and saving raw thermal frames from a **FLIR Lepton** camera over USB using **libuvc**. Includes tools for capture, quick viewing, and custom analysis. Primarily tested on Lepton 3/3.5 modules with UVC-compatible breakout boards.
 
 ---
 
-## 📦 Project structure
+## 📁 Project Structure
 
 ```
-lepton/
-├── libuvc/            # C library submodule (pre-built .so / .dll here)
-├── readout.py         # Live capture → binary file
-├── binary_viewer.py   # Quick-look viewer for captured frames
-└── README.md          # You’re reading it
+.
+├── readout.py                  # Capture frames from Lepton and save as .bin
+├── binary_viewer.py            # View saved frames (standard)
+├── binary_viewer_dennisM1.py   # Custom viewer with CLI for macOS/testing
+├── uvc-deviceinfo.py           # Device info utility
+├── uvc-radiometry.py           # Radiometry utility
+├── uvctypes.py                 # UVC ctypes definitions
+├── saved_frames_test_2/        # Example output directory for frames
+├── standard-units.yaml         # Reference data
+└── lepton_instructions.txt     # Additional notes
 ```
 
 ---
 
 ## 🔧 Prerequisites
 
-| Dependency | Tested version | Notes                                  |
-| ---------- | -------------- | -------------------------------------- |
-| Python     | ≥ 3.8          | `venv` recommended                     |
-| libuvc     | 0.0.7-dev      | Built from source; requires libusb-1.0 |
-| NumPy      | ≥ 1.24         | Frame buffer manipulation              |
-| Matplotlib | ≥ 3.7          | Optional—plots frames                  |
+- **Python** ≥ 3.8  
+  Recommended: use a virtual environment (`python -m venv venv`)
+- **NumPy** ≥ 1.24
+- **OpenCV** (Python package, for image processing)
+- **Matplotlib** (optional, for plotting)
+- **libuvc** (system library, built from source)
 
-### *Install libuvc (Linux/macOS)*
+### Install Python dependencies
+
+```bash
+pip install numpy opencv-python matplotlib
+```
+
+### Install libuvc (Linux/macOS)
 
 ```bash
 git clone https://github.com/libuvc/libuvc.git
@@ -37,58 +47,62 @@ make && sudo make install      # installs libuvc and headers
 sudo ldconfig                  # Linux only
 ```
 
-> **Windows** users: grab the pre-built `libuvc.dll` from the official releases or build with MSYS2/MinGW.
+> **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
 
 ---
 
-## 🚀 Quick start
+## 🚀 Quick Start
 
 1. **Plug in the Lepton** USB board.
 2. Open a terminal in the repo root and run:
 
 ```bash
-cd libuvc                # step 1 of original notes
-python ../readout.py     # start capture
+python readout.py              # Start capture (frames saved to ./saved_frames_test_3/ by default)
 ```
 
-### Trouble opening the camera?
-
-If you see `uvc_open_error`:
+3. To view saved frames:
 
 ```bash
-sudo chmod -R 777 /dev/bus/usb/    # temporary blanket permission fix
+python binary_viewer.py        # Standard viewer (uses default save dir)
+# OR
+python binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (macOS/testing)
 ```
-
-Then re-run `python readout.py`.&#x20;
-
-> **Security tip:** For production, create a dedicated `udev` rule instead of `777`.
-
-### Stopping a capture
-
-Press **Ctrl + C** in the terminal.
 
 ---
 
-## 🖥️ Viewing your data
+## 🖥️ Script Details
 
-```bash
-python binary_viewer.py
-```
-
-`binary_viewer.py` reads the binary file saved by `readout.py` and plots the frames or dumps them as PNGs. The default path is overwritten on every run—edit the constant at the top of each script if you need unique filenames or directories.&#x20;
-
----
-
-## ✍️ Changing default paths
-
-Open the script in VS Code:
-
-```bash
-code readout.py          # or binary_viewer.py
-```
-
-Look for the `OUTPUT_PATH` variable near the top and change it to a new folder so you don’t overwrite previous captures.&#x20;
+- **readout.py** — Captures frames from the Lepton and saves as `.bin` files in a directory (default: `saved_frames_test_3`). Edit `SAVE_DIR` at the top to change output location.
+- **binary_viewer.py** — Loads and displays frames from the default directory. Edit `SAVE_DIR` if needed.
+- **binary_viewer_dennisM1.py** — Custom viewer with command-line argument for directory. Useful for macOS or advanced testing.
+- **uvc-deviceinfo.py**, **uvc-radiometry.py** — Utilities for device info and radiometry.
 
 ---
 
-the dennis tagged readout.py and binary_viewer.py is my custom code to allow additional command parameters (for my own testing) specifically for macos
+## ⚙️ Customization
+
+- To change where frames are saved, edit the `SAVE_DIR` variable at the top of `readout.py` and `binary_viewer.py`.
+- For unique filenames or directories, modify the scripts as needed.
+
+---
+
+## 🛠️ Troubleshooting
+
+- **Camera open error (`uvc_open_error`)**:
+  ```bash
+  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux/macOS)
+  ```
+  > For production, create a dedicated `udev` rule instead of using `777` permissions.
+
+- **macOS notes:**
+  - Custom scripts (tagged `dennis`) allow additional command parameters for testing.
+  - You may need to grant extra permissions for USB access.
+
+- **Stopping a capture:** Press **Ctrl + C** in the terminal.
+
+---
+
+## 📄 Additional Notes
+
+- All scripts are intended for research and prototyping. Review and adapt for production use as needed.
+- For more details, see `lepton_instructions.txt`.

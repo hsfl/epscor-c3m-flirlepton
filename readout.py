@@ -74,7 +74,7 @@ def main():
             res = libuvc.uvc_open(dev, byref(devh))
             print(devh)
             if res < 0:
-                print("uvc_open error")
+                print("uvc_open error - use command 'sudo chmod -R 777 /dev/bus/usb/' as a temporary blanket permission fix for testing.")
                 exit(1)
 
             print("device opened!")

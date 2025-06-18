@@ -2,9 +2,10 @@ from ctypes import *
 import platform
 
 try:
-  libuvc = cdll.LoadLibrary('/home/chase/libuvc/libuvc.so')
+  # This is for Linux - once u build and install the libuvc via make command, it will use the dynamic link path and work.
+  libuvc = cdll.LoadLibrary('libuvc.so')
 except OSError:
-  print("Error: could not find libuvc!")
+  print("Error: could not find libuvc! Make sure you ran the 'make && sudo make install' command. If you're on Linux, also run the 'sudo ldconfig' to link the library to your path.")
   exit(1)
 
 class uvc_context(Structure):
@@ -174,6 +175,16 @@ UVC_FRAME_FORMAT_UYVY = 4
 UVC_FRAME_FORMAT_I420 = 5
 UVC_FRAME_FORMAT_RGB = 7
 UVC_FRAME_FORMAT_BGR = 8
+# UVC_FRAME_FORMAT_Y16
+# --------------------
+# 16-bit, single-channel grayscale defined by the USB-Video-Class spec.
+# Each pixel = little-endian uint16 (0–65 535).
+#
+# Radiometric FLIR Lepton (“TLinear”) encoding:
+#     temp_C = (raw_value * 0.01) - 273.15
+#
+# Frames arrive in NumPy/OpenCV as dtype uint16  (CV_16UC1).
+
 # _FRAME_FORMAT_Y16 from 9 to 10 in uvctype.py, let alone uvc-radiometry.py will work it will also correctly read min and max temperatures.
 UVC_FRAME_FORMAT_Y16 = 10
 
