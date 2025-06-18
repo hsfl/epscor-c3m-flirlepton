@@ -105,10 +105,17 @@ def main():
                     if data is None:
                         break
 
-                    # Save the frame as a binary array
-                    frame_filename = os.path.join(SAVE_DIR, f"frame_{frame_count:05d}.bin")
-                    data.tofile(frame_filename)
-                    frame_count += 1
+                    # TODO: Replace per-frame .bin saving with saving all frames to a single .npz file.
+                    # Context: Instead of saving each frame as a separate binary file, accumulate frames in a list or array during acquisition.
+                    # After acquisition, use np.savez_compressed('frames.npz', frames=np.array(frame_list)) to store all frames in one compressed file.
+                    # When loading, use: data = np.load('frames.npz')['frames']
+                    # This will make data management and loading much easier for analysis.
+                    # Example:
+                    #   frame_list = []  # before loop
+                    #   ...
+                    #   frame_list.append(data)  # inside loop
+                    #   ...
+                    #   np.savez_compressed('frames.npz', frames=np.array(frame_list))  # after loop
 
                     data = cv2.resize(data[:, :], (160, 120))
                     minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(data)
@@ -123,6 +130,10 @@ def main():
                     expected_time = frame_count / FRAME_RATE
                     if elapsed_time < expected_time:
                         time.sleep(expected_time - elapsed_time)
+
+                    # Break if window is closed
+                    if cv2.getWindowProperty('Lepton Radiometry', cv2.WND_PROP_VISIBLE) < 1:
+                        break
 
                 cv2.destroyAllWindows()
             finally:
