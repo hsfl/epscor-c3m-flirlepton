@@ -48,6 +48,8 @@ sudo ldconfig                  # Linux only
 ```
 
 > **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
+> **macOS:** You must open uvctypes.py and change the file name in line 6 from `libuvc = cdll.LoadLibrary('libuvc.so')` to `libuvc = cdll.LoadLibrary('libuvc.dylib')` so that macOS can find libuvc.
+
 
 ---
 
@@ -57,17 +59,16 @@ sudo ldconfig                  # Linux only
 2. Open a terminal in the repo root and run:
 
 ```bash
-python readout.py              # Start capture (frames saved to ./saved_frames_test_3/ by default)
+python3 readout.py              # Start capture (frames saved to ./saved_frames_test_3/ by default)
 ```
 
 3. To view saved frames:
 
 ```bash
-python binary_viewer.py        # Standard viewer (uses default save dir)
+python3 binary_viewer.py        # Standard viewer (uses default save dir)
 # OR
-python binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (macOS/testing)
+python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (macOS/testing)
 ```
-
 ---
 
 ## 🖥️ Script Details
@@ -90,9 +91,13 @@ python binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (macO
 
 - **Camera open error (`uvc_open_error`)**:
   ```bash
-  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux/macOS)
+  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux)
   ```
   > For production, create a dedicated `udev` rule instead of using `777` permissions.
+
+  ```bash
+  sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py   # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
+  ```
 
 - **macOS notes:**
   - Custom scripts (tagged `dennis`) allow additional command parameters for testing.

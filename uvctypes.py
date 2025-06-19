@@ -5,7 +5,8 @@ try:
   # This is for Linux - once u build and install the libuvc via make command, it will use the dynamic link path and work.
   libuvc = cdll.LoadLibrary('libuvc.so')
 except OSError:
-  print("Error: could not find libuvc! Make sure you ran the 'make && sudo make install' command. If you're on Linux, also run the 'sudo ldconfig' to link the library to your path.")
+  print("Error: could not find libuvc! Make sure you ran the 'make && sudo make install' command. If you're on Linux, also run the 'sudo ldconfig' to link the library to your path. " +
+        "If you're using macOS, make sure to change the file name in uvctypes.py (line 6) to 'libuvc.dylib'")
   exit(1)
 
 class uvc_context(Structure):
