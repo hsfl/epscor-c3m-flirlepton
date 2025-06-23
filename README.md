@@ -48,6 +48,7 @@ sudo ldconfig                  # Linux only
 ```
 
 > **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
+>
 > **macOS:** You must open uvctypes.py and change the file name in line 6 from `libuvc = cdll.LoadLibrary('libuvc.so')` to `libuvc = cdll.LoadLibrary('libuvc.dylib')` so that macOS can find libuvc.
 
 
@@ -96,7 +97,7 @@ python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (mac
   > For production, create a dedicated `udev` rule instead of using `777` permissions.
 
   ```bash
-  sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py   # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
+  sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
   ```
 
 - **macOS notes:**
