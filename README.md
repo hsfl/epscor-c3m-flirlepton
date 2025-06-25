@@ -49,6 +49,8 @@ sudo ldconfig                  # Linux only
 ```
 
 > **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
+>
+> **macOS:** You must open uvctypes.py and change the file name in line 6 from `libuvc = cdll.LoadLibrary('libuvc.so')` to `libuvc = cdll.LoadLibrary('libuvc.dylib')` so that macOS can find libuvc.
 
 ---
 
@@ -76,7 +78,6 @@ python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for 
 > **Directory:** Enter the directory number that has the .npz file you wish to view and record temperature data from. The temperature data will be stored in a txt file in the root repo with the same name as the directory selected. 
 
 > **Data Set Name:** Enter a custom name for the current data set. This name will be printed to the txt file. New data sets from the same directory will be stored in the same txt file but appended to the previous data.
-
 ---
 
 ## 🖥️ Script Details
@@ -108,9 +109,13 @@ python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for 
 
 - **Camera open error (`uvc_open_error`)**:
   ```bash
-  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux/macOS)
+  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux)
   ```
   > For production, create a dedicated `udev` rule instead of using `777` permissions.
+
+  ```bash
+  sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
+  ```
 
 - **macOS notes:**
   - Custom scripts (tagged `dennis`) allow additional command parameters for testing.
