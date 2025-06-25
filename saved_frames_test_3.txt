@@ -1,0 +1,73 @@
+Data set name: test 1
+Showing frame 1/32 Average Temperature: 66.68 Fahrenheit
+Showing frame 2/32 Average Temperature: 66.67 Fahrenheit
+Showing frame 3/32 Average Temperature: 66.72 Fahrenheit
+Showing frame 4/32 Average Temperature: 66.78 Fahrenheit
+Showing frame 5/32 Average Temperature: 66.65 Fahrenheit
+Showing frame 6/32 Average Temperature: 66.56 Fahrenheit
+Showing frame 7/32 Average Temperature: 66.52 Fahrenheit
+Showing frame 8/32 Average Temperature: 66.49 Fahrenheit
+Showing frame 9/32 Average Temperature: 66.47 Fahrenheit
+Showing frame 10/32 Average Temperature: 74.60 Fahrenheit
+Showing frame 11/32 Average Temperature: 77.70 Fahrenheit
+Showing frame 12/32 Average Temperature: 84.06 Fahrenheit
+Showing frame 13/32 Average Temperature: 76.47 Fahrenheit
+Showing frame 14/32 Average Temperature: 81.39 Fahrenheit
+Showing frame 15/32 Average Temperature: 74.44 Fahrenheit
+Showing frame 16/32 Average Temperature: 77.47 Fahrenheit
+Showing frame 17/32 Average Temperature: 75.70 Fahrenheit
+Showing frame 18/32 Average Temperature: 80.00 Fahrenheit
+Showing frame 19/32 Average Temperature: 70.82 Fahrenheit
+Showing frame 20/32 Average Temperature: 78.29 Fahrenheit
+Showing frame 21/32 Average Temperature: 72.16 Fahrenheit
+Showing frame 22/32 Average Temperature: 74.89 Fahrenheit
+Showing frame 23/32 Average Temperature: 81.58 Fahrenheit
+Showing frame 24/32 Average Temperature: 79.99 Fahrenheit
+Showing frame 25/32 Average Temperature: 84.25 Fahrenheit
+Showing frame 26/32 Average Temperature: 66.24 Fahrenheit
+Showing frame 27/32 Average Temperature: 66.28 Fahrenheit
+Showing frame 28/32 Average Temperature: 66.17 Fahrenheit
+Showing frame 29/32 Average Temperature: 66.23 Fahrenheit
+Showing frame 30/32 Average Temperature: 66.13 Fahrenheit
+Showing frame 31/32 Average Temperature: 66.27 Fahrenheit
+Showing frame 32/32 Average Temperature: 66.25 Fahrenheit
+
+
+Data set name: 2
+Showing frame 1/35 Average Temperature: 66.52 Fahrenheit
+Showing frame 2/35 Average Temperature: 66.59 Fahrenheit
+Showing frame 3/35 Average Temperature: 66.62 Fahrenheit
+Showing frame 4/35 Average Temperature: 66.59 Fahrenheit
+Showing frame 5/35 Average Temperature: 66.62 Fahrenheit
+Showing frame 6/35 Average Temperature: 66.51 Fahrenheit
+Showing frame 7/35 Average Temperature: 66.58 Fahrenheit
+Showing frame 8/35 Average Temperature: 66.58 Fahrenheit
+Showing frame 9/35 Average Temperature: 66.52 Fahrenheit
+Showing frame 10/35 Average Temperature: 66.46 Fahrenheit
+Showing frame 11/35 Average Temperature: 66.56 Fahrenheit
+Showing frame 12/35 Average Temperature: 66.49 Fahrenheit
+Showing frame 13/35 Average Temperature: 66.47 Fahrenheit
+Showing frame 14/35 Average Temperature: 66.47 Fahrenheit
+Showing frame 15/35 Average Temperature: 66.50 Fahrenheit
+Showing frame 16/35 Average Temperature: 66.51 Fahrenheit
+Showing frame 17/35 Average Temperature: 66.52 Fahrenheit
+Showing frame 18/35 Average Temperature: 66.46 Fahrenheit
+Showing frame 19/35 Average Temperature: 66.44 Fahrenheit
+Showing frame 20/35 Average Temperature: 66.36 Fahrenheit
+Showing frame 21/35 Average Temperature: 66.36 Fahrenheit
+Showing frame 22/35 Average Temperature: 66.42 Fahrenheit
+Showing frame 23/35 Average Temperature: 66.42 Fahrenheit
+Showing frame 24/35 Average Temperature: 66.32 Fahrenheit
+Showing frame 25/35 Average Temperature: 66.42 Fahrenheit
+Showing frame 26/35 Average Temperature: 66.30 Fahrenheit
+Showing frame 27/35 Average Temperature: 66.34 Fahrenheit
+Showing frame 28/35 Average Temperature: 66.38 Fahrenheit
+Showing frame 29/35 Average Temperature: 66.32 Fahrenheit
+Showing frame 30/35 Average Temperature: 66.38 Fahrenheit
+Showing frame 31/35 Average Temperature: 66.34 Fahrenheit
+Showing frame 32/35 Average Temperature: 66.30 Fahrenheit
+Showing frame 33/35 Average Temperature: 66.30 Fahrenheit
+Showing frame 34/35 Average Temperature: 66.26 Fahrenheit
+Showing frame 35/35 Average Temperature: 66.30 Fahrenheit
+
+
