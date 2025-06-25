@@ -52,7 +52,6 @@ sudo ldconfig                  # Linux only
 >
 > **macOS:** You must open uvctypes.py and change the file name in line 6 from `libuvc = cdll.LoadLibrary('libuvc.so')` to `libuvc = cdll.LoadLibrary('libuvc.dylib')` so that macOS can find libuvc.
 
-
 ---
 
 ## 🚀 Quick Start
@@ -61,23 +60,13 @@ sudo ldconfig                  # Linux only
 2. Open a terminal in the repo root and run:
 
 ```bash
-<<<<<<< macOS_functionality
-python3 readout.py              # Start capture (frames saved to ./saved_frames_test_3/ by default)
-=======
 python3 readout.py              # Start capture
->>>>>>> master
 ```
 > **Directory:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. The program will overwrite any file named frames.npz within the selected directory, so enter an unused number if you wish to keep any original data. 
 
 3. View saved frames and export temperature data:
 
 ```bash
-<<<<<<< macOS_functionality
-python3 binary_viewer.py        # Standard viewer (uses default save dir)
-# OR
-python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (macOS/testing)
-```
-=======
 python3 npz_viewer.py                                   # Standard viewer for .npz files
 
 # To export frames as .bin files see customization section before running these commands
@@ -89,8 +78,6 @@ python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for 
 > **Directory:** Enter the directory number that has the .npz file you wish to view and record temperature data from. The temperature data will be stored in a txt file in the root repo with the same name as the directory selected. 
 
 > **Data Set Name:** Enter a custom name for the current data set. This name will be printed to the txt file. New data sets from the same directory will be stored in the same txt file but appended to the previous data.
-
->>>>>>> master
 ---
 
 ## 🖥️ Script Details
