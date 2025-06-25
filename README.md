@@ -8,9 +8,10 @@ Tiny Python toolkit for streaming and saving raw thermal frames from a **FLIR Le
 
 ```
 .
-├── readout.py                  # Capture frames from Lepton and save as .bin
-├── binary_viewer.py            # View saved frames (standard)
-├── binary_viewer_dennisM1.py   # Custom viewer with CLI for macOS/testing
+├── readout.py                  # Capture frames from Lepton and save as .npz
+├── binary_viewer.py            # View saved frames (.bin files)
+├── binary_viewer_dennisM1.py   # Custom viewer with CLI for macOS/testing (.bin files)
+├── npz_viewer.py               # View saved frames (.npz files) and export temperature data to txt file
 ├── uvc-deviceinfo.py           # Device info utility
 ├── uvc-radiometry.py           # Radiometry utility
 ├── uvctypes.py                 # UVC ctypes definitions
@@ -60,30 +61,59 @@ sudo ldconfig                  # Linux only
 2. Open a terminal in the repo root and run:
 
 ```bash
+<<<<<<< macOS_functionality
 python3 readout.py              # Start capture (frames saved to ./saved_frames_test_3/ by default)
+=======
+python3 readout.py              # Start capture
+>>>>>>> master
 ```
+> **Directory:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. The program will overwrite any file named frames.npz within the selected directory, so enter an unused number if you wish to keep any original data. 
 
-3. To view saved frames:
+3. View saved frames and export temperature data:
 
 ```bash
+<<<<<<< macOS_functionality
 python3 binary_viewer.py        # Standard viewer (uses default save dir)
 # OR
 python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer (macOS/testing)
 ```
+=======
+python3 npz_viewer.py                                   # Standard viewer for .npz files
+
+# To export frames as .bin files see customization section before running these commands
+# Does not export temperature data
+python3 binary_viewer.py                                # Standard viewer for .bin files (uses default save dir)
+# OR
+python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for .bin files (macOS/testing)
+```
+> **Directory:** Enter the directory number that has the .npz file you wish to view and record temperature data from. The temperature data will be stored in a txt file in the root repo with the same name as the directory selected. 
+
+> **Data Set Name:** Enter a custom name for the current data set. This name will be printed to the txt file. New data sets from the same directory will be stored in the same txt file but appended to the previous data.
+
+>>>>>>> master
 ---
 
 ## 🖥️ Script Details
 
-- **readout.py** — Captures frames from the Lepton and saves as `.bin` files in a directory (default: `saved_frames_test_3`). Edit `SAVE_DIR` at the top to change output location.
-- **binary_viewer.py** — Loads and displays frames from the default directory. Edit `SAVE_DIR` if needed.
+- **readout.py** — Captures frames from the Lepton and saves as `.npz` file in a custom directory
+- **npz_viewer.py** - Loads and displays frames from `.npz` file. Exports average temperature by frame to `.txt` file.
+- **binary_viewer.py** — Loads and displays frames from `.bin` files. Uses the default directory (defualt: `saved_frames_test_3`). Edit `SAVE_DIR` if needed.
 - **binary_viewer_dennisM1.py** — Custom viewer with command-line argument for directory. Useful for macOS or advanced testing.
 - **uvc-deviceinfo.py**, **uvc-radiometry.py** — Utilities for device info and radiometry.
 
 ---
 
 ## ⚙️ Customization
-
-- To change where frames are saved, edit the `SAVE_DIR` variable at the top of `readout.py` and `binary_viewer.py`.
+- By default, `readout.py` will export frames as an `.npz` file. Changes to the program can be made to export frames to `.bin` files:
+    1. Un-comment line 144 to call save_frame_to_bin() function
+    ```bash
+    save_frame_to_bin(data, frame_count)
+    ```
+    2. Comment out line 186 to prevent frames from being saved as .npz files
+    ```bash
+    save_frame_to_npz(frame_list)
+    ```
+- To change which frames are displayed, edit the `SAVE_DIR` variable at the top of `binary_viewer.py`.
 - For unique filenames or directories, modify the scripts as needed.
 
 ---
