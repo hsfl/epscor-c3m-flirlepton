@@ -4,7 +4,7 @@ import cv2
 import threading
 import queue
 import glob
-import statistics
+from datetime import datetime
 
 TARGET_DIR = "saved_frames_test_" + input("Enter target directory number: saved_frames_test_")     # Location of npz file from readout.py
 DATA_NAME = input("Enter a name for this data set: ")                                              # Name for data exported to txt file
@@ -20,13 +20,15 @@ def ktof(val):
 
 # Averages array of temperature values
 def getAvgTemp(frame):
-    tempAvg = round(statistics.mean(frame), 3)
+    tempAvg = round(np.mean(frame), 3)
     return tempAvg
 
 # Exports string items in list frameData to txt file
 def exportFrames(frameData): 
     with open(TARGET_DIR + ".txt", "a") as file: 
         file.write("Data set name: " + DATA_NAME + "\n")
+        file.write(str(datetime.now()) + "\n") 
+
 
         for frames in frameData:
             file.write(frames + "\n")
@@ -59,7 +61,7 @@ for i, frame in enumerate(data):
     # Displays each frame and prints average temperature
     cv2.imshow('Video Playback', frame_8bit)
 
-    avg_temp = getAvgTemp(ktof(frame[i]))
+    avg_temp = getAvgTemp(ktof(frame))
     frameDataConsole = f"Showing frame {i+1}/{len(data)} \033[36mAverage Temperature: {avg_temp:.2f} Fahrenheit\033[0m"
     print(frameDataConsole)
 

@@ -4,7 +4,7 @@ import cv2
 import threading
 import queue
 
-SAVE_DIR = "saved_frames_test_3"  # Directory where frames are saved
+SAVE_DIR = "saved_frames_test_2" # Directory where frames are saved
 FRAME_WIDTH = 160  # Frame width
 FRAME_HEIGHT = 120  # Frame height
 

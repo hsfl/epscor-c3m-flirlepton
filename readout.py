@@ -5,6 +5,7 @@ import numpy as np
 from queue import Queue
 import platform
 import os
+import ctypes
 
 
 BUF_SIZE = 2
@@ -119,6 +120,9 @@ def main():
            libuvc.uvc_get_stream_ctrl_format_size(devh, byref(ctrl), UVC_FRAME_FORMAT_Y16,
                frame_formats[0].wWidth, frame_formats[0].wHeight, int(1e7 / frame_formats[0].dwDefaultFrameInterval)
            )
+           
+           q_obj = ctypes.py_object(q)
+           userptr = ctypes.cast(ctypes.pointer(q_obj), ctypes.c_void_p)
 
 
            res = libuvc.uvc_start_streaming(devh, byref(ctrl), PTR_PY_FRAME_CALLBACK, None, 0)
@@ -130,7 +134,9 @@ def main():
            try:
                frame_count = 0
                start_time = time.time()
-
+               
+               cv2.namedWindow('Lepton Radiometry', cv2.WINDOW_NORMAL) # Resizble window container
+               show_temp = True # Toggle flag for temp overlay
 
                while True:
                 try:
@@ -139,7 +145,8 @@ def main():
                     if data is None:
                         break
                     
-                    # Uncomment line 142 to save each frame as binary files
+                    # Uncomment line 144 to save each frame as binary files
+                    # You may also want to comment out line 186 to prevent frames from being saved as a npz file
                     # save_frame_to_bin(data, frame_count)
                     frame_count += 1
 
@@ -158,13 +165,29 @@ def main():
                    #   np.savez_compressed('frames.npz', frames=np.array(frame_list))  # after loop
 
 
-                    data = cv2.resize(data[:, :], (160, 120))
+                    # data = cv2.resize(data[:, :], (160, 120))
+                    # minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(data)
+                    # img = raw_to_8bit(data)
+                    # display_temperature(img, minVal, minLoc, (255, 0, 0))
+                    # display_temperature(img, maxVal, maxLoc, (0, 0, 255))
+                    # cv2.imshow('Lepton Radiometry', img)
+                    # cv2.waitKey(1)
+
+                    data = cv2.resize(data[:, :], (1280, 960)) # Resize Image capture screen (orignial (160, 120))
                     minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(data)
                     img = raw_to_8bit(data)
-                    display_temperature(img, minVal, minLoc, (255, 0, 0))
-                    display_temperature(img, maxVal, maxLoc, (0, 0, 255))
+
+
+                    data = q_obj
+                  
+                    if show_temp: #for toggle temp
+                        display_temperature(img, minVal, minLoc, (255, 0, 0))
+                        display_temperature(img, maxVal, maxLoc, (0, 0, 255))
                     cv2.imshow('Lepton Radiometry', img)
-                    cv2.waitKey(1)
+                   # cv2.waitKey(1)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('t'):
+                        show_temp = not show_temp
 
 
                     # Ensure the desired frame rate
@@ -181,6 +204,7 @@ def main():
                 except KeyboardInterrupt:
                     print(" Camera closed by User")
 
+                    # Comment out line 186 to prevent frames from being saved as npz file (if using .bin instead)
                     save_frame_to_npz(frame_list)
                     exit(0)
 
