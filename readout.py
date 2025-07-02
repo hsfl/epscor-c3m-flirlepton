@@ -13,7 +13,7 @@ q = Queue(BUF_SIZE)
 
 SAVE_DIR = "saved_frames_test_" + input("Enter directory number: saved_frames_test_")       # Directory to save .npz file in
 FRAME_RATE = 6                                                                              # Desired frame rate (frames per second)
-
+NPZ_FILE_NAME = input("Enter a file name (no spaces): ") + ".npz"
 
 # Create the directory if it doesn't exist
 if not os.path.exists(SAVE_DIR):
@@ -26,10 +26,9 @@ def save_frame_to_bin(frame, index):
 
 # Saves frames in single npz file
 def save_frame_to_npz(frame_list):
-    file_path = os.path.join(SAVE_DIR, "frames.npz")
+    file_path = os.path.join(SAVE_DIR, NPZ_FILE_NAME)
     np.savez_compressed(file_path, frames=np.array(frame_list))
-    print("Saved frames to " + file_path)
-
+    print("Successfully saved frames to " + file_path)
 
 def py_frame_callback(frame, userptr):
    array_pointer = cast(frame.contents.data, POINTER(c_uint16 * (frame.contents.width * frame.contents.height)))
@@ -67,7 +66,7 @@ def raw_to_8bit(data):
 
 def display_temperature(img, val_k, loc, color):
    val = ktof(val_k)
-   cv2.putText(img,"{0:.1f} degF".format(val), loc, cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
+   cv2.putText(img,"{0:.1f} degF".format(val), loc, cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 2)
    x, y = loc
    cv2.line(img, (x - 2, y), (x + 2, y), color, 1)
    cv2.line(img, (x, y - 2), (x, y + 2), color, 1)
@@ -146,7 +145,7 @@ def main():
                         break
                     
                     # Uncomment line 144 to save each frame as binary files
-                    # You may also want to comment out line 186 to prevent frames from being saved as a npz file
+                    # You may also want to comment out line 213 to prevent frames from being saved as a npz file
                     # save_frame_to_bin(data, frame_count)
                     frame_count += 1
 
@@ -199,26 +198,25 @@ def main():
 
                     # Break if window is closed
                     if cv2.getWindowProperty('Lepton Radiometry', cv2.WND_PROP_VISIBLE) < 1:
+                        print("Window closed by User")
                         break
 
                 except KeyboardInterrupt:
                     print(" Camera closed by User")
-
-                    # Comment out line 186 to prevent frames from being saved as npz file (if using .bin instead)
-                    save_frame_to_npz(frame_list)
-                    exit(0)
-
-
-               cv2.destroyAllWindows()
+                    break
+    
            finally:
                libuvc.uvc_stop_streaming(devh)
+               cv2.destroyAllWindows()
+               
+               # Comment out line 213 to prevent frames from being saved as npz file (if using .bin instead)
+               save_frame_to_npz(frame_list)
 
-
-           print("done")
        finally:
            libuvc.uvc_unref_device(dev)
    finally:
        libuvc.uvc_exit(ctx)
+
 
 
 if __name__ == '__main__':
