@@ -1,9 +1,16 @@
 from ctypes import *
+from ctypes import cdll
+from ctypes.util import find_library
 import platform
 
 try:
   # This is for Linux - once u build and install the libuvc via make command, it will use the dynamic link path and work.
-  libuvc = cdll.LoadLibrary('libuvc.so')
+  name = find_library("uvc")  # will resolve to e.g. "libuvc.dylib" on macOS
+  if not name:
+    raise OSError("Could not find libuvc via ctypes.util.find_library('uvc'). "
+                  "Ensure libuvc is installed and on the loader path.")
+  
+  libuvc = cdll.LoadLibrary(name)
 except OSError:
   print("Error: could not find libuvc! Make sure you ran the 'make && sudo make install' command. If you're on Linux, also run the 'sudo ldconfig' to link the library to your path.")
   exit(1)

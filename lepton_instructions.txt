@@ -1,24 +1,32 @@
-1) open up the terminal and type:
-cd libuvc
+1) Open terminal and go to the repo:
+cd epscor-c3m-flirlepton
 
-2) to run the data collection, type
-python readout.py 
+2) Run data collection:
+# Linux:
+python3 readout.py
 
-2a) if you get an error that says uvc_open_error, type and run: 
-sudo chmod -R 777 /dev/bus/usb/ 
+# macOS:
+sudo python3 readout.py
 
-if it asks for a password, the password is on the post it. 
+3) If you get uvc_open error (Access denied), verify access with:
+# Linux quick test fix:
+sudo chmod -R 777 /dev/bus/usb/
+python3 uvc-deviceinfo.py
+python3 readout.py
 
-try running line 4 again
+# macOS:
+sudo python3 uvc-deviceinfo.py
+sudo python3 readout.py
 
-to kill the data collection, click the terminal and press Ctrl+C. 
+Recent macOS versions may require root (or app entitlements) for libusb/libuvc access.
+On Linux, prefer a udev rule over chmod 777 for long-term use.
 
-3) To view the data you just got type: 
-python binary_viewer.py
+4) To stop data collection:
+Press Ctrl+C in the capture terminal.
 
-4) The program will be set to overwrite whatever is in the file so make sure that you are either okay with that or set a new directory in the code. 
+5) To view data:
+python3 npz_viewer.py
+# or for .bin frames:
+python3 binary_viewer.py
 
-5) To edit the python programs in vscode (e.g. change directory, type:
-code <name_of_file> 
-
-and change the output directories to avoid overwriting.
+6) To avoid overwriting output, change save directory/file names in code as needed.

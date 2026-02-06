@@ -71,13 +71,25 @@ def display_temperature(img, val_k, loc, color):
    cv2.line(img, (x - 2, y), (x + 2, y), color, 1)
    cv2.line(img, (x, y - 2), (x, y + 2), color, 1)
 
+def print_uvc_open_error(res):
+   try:
+       libuvc.uvc_strerror.argtypes = [c_int]
+       libuvc.uvc_strerror.restype = c_char_p
+       err = libuvc.uvc_strerror(res)
+       err_str = err.decode() if err else "Unknown error"
+   except Exception:
+       err_str = "Unknown error"
+
+   print(f"uvc_open error ({res}): {err_str}")
+   if platform.system() == "Darwin" and res == -3:
+       print("macOS denied USB capture access. Run with sudo, or use a signed app with USB capture entitlement.")
+
 
 def main():
    ctx = POINTER(uvc_context)()
    dev = POINTER(uvc_device)()
    devh = POINTER(uvc_device_handle)()
    ctrl = uvc_stream_ctrl()
-
    # Stores all frames recorded by camera
    frame_list = []
 
@@ -99,7 +111,7 @@ def main():
            res = libuvc.uvc_open(dev, byref(devh))
            print(devh)
            if res < 0:
-               print("uvc_open error - use command 'sudo chmod -R 777 /dev/bus/usb/' as a temporary blanket permission fix for testing.")
+               print_uvc_open_error(res)
                exit(1)
 
 

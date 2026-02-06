@@ -3,6 +3,19 @@
 
 from uvctypes import *
 
+def print_uvc_open_error(res):
+  try:
+    libuvc.uvc_strerror.argtypes = [c_int]
+    libuvc.uvc_strerror.restype = c_char_p
+    err = libuvc.uvc_strerror(res)
+    err_str = err.decode() if err else "Unknown error"
+  except Exception:
+    err_str = "Unknown error"
+
+  print(f"uvc_open error ({res}): {err_str}")
+  if platform.system() == "Darwin" and res == -3:
+    print("macOS denied USB capture access. Run with sudo, or use a signed app with USB capture entitlement.")
+
 def main():
   ctx = POINTER(uvc_context)()
   dev = POINTER(uvc_device)()
@@ -23,7 +36,7 @@ def main():
     try:
       res = libuvc.uvc_open(dev, byref(devh))
       if res < 0:
-        print("uvc_open error")
+        print_uvc_open_error(res)
         exit(1)
 
       print_device_info(devh)

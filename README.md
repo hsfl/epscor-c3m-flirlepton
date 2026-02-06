@@ -61,7 +61,11 @@ sudo ldconfig                  # Linux only
 2. Open a terminal in the repo root and run:
 
 ```bash
-python3 readout.py              # Start capture
+# Linux
+python3 readout.py
+
+# macOS
+sudo python3 readout.py         # macOS may require root for libusb/uvc_open
 ```
 > **Directory and File Name:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. Enter a custom name for the npz file (do not include  spaces or .npz)
 
@@ -121,13 +125,22 @@ python3 compare_temp.py         # Average Temperature Difference
 
 - **Camera open error (`uvc_open_error`)**:
   ```bash
-  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux/macOS)
+  # Linux quick test fix
+  sudo chmod -R 777 /dev/bus/usb/
+  python3 uvc-deviceinfo.py
+  python3 readout.py
+
+  # macOS
+  sudo python3 uvc-deviceinfo.py
+  sudo python3 readout.py
   ```
-  > For production, create a dedicated `udev` rule instead of using `777` permissions.
+  > On recent macOS releases, libusb may need root (or USB capture entitlements) to detach the UVC kernel driver.
+  >
+  > On Linux, prefer a dedicated `udev` rule for persistent access instead of `chmod 777`.
 
 - **macOS notes:**
   - Custom scripts (tagged `dennis`) allow additional command parameters for testing.
-  - You may need to grant extra permissions for USB access.
+  - Camera privacy prompts may not appear for this libusb/libuvc path because it does not use AVFoundation.
 
 - **Stopping a capture:** Press **Ctrl + C** in the terminal.
 
