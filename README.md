@@ -1,152 +1,144 @@
 # FLIR Lepton USB Capture Toolkit
 
-Tiny Python toolkit for streaming and saving raw thermal frames from a **FLIR Lepton** camera over USB using **libuvc**. Includes tools for capture, quick viewing, and custom analysis. Primarily tested on Lepton 3/3.5 modules with UVC-compatible breakout boards.
+Python toolkit for capturing and analyzing FLIR Lepton thermal data over USB using `libuvc` + `ctypes`.
 
----
+## What Is New
 
-## 📁 Project Structure
+This repo now includes an MVP pipeline that matches the Boson-style workflow while staying on a confirmed Lepton path (no OpenCV camera capture):
 
-```
+- `lepton-camera.py`: capture Y16 thermal frames and save to `.npy`
+- `view_lepton_npy.py`: playback + hotspot analysis from `.npy`
+
+Legacy scripts are still present for prior workflows.
+
+## Project Structure
+
+```text
 .
-├── readout.py                  # Capture frames from Lepton and save as .npz
-├── binary_viewer.py            # View saved frames (.bin files)
-├── binary_viewer_dennisM1.py   # Custom viewer with CLI for macOS/testing (.bin files)
-├── npz_viewer.py               # View saved frames (.npz files) 
-├── temp_viewer.py              # Averages temperature values across a single data set
-├── compare_temp.py             # Gives the difference in average temperatures between 2 data sets 
+├── lepton-camera.py            # New libuvc capture app (.npy + metadata .json)
+├── view_lepton_npy.py          # New viewer/analyzer for .npy stacks
+├── readout.py                  # Legacy capture script (.npz flow)
+├── npz_viewer.py               # Legacy .npz viewer
+├── temp_viewer.py              # Legacy per-pixel average temperature heatmap
+├── binary_viewer.py            # Legacy .bin frame viewer
+├── binary_viewer_dennisM1.py   # Legacy CLI .bin frame viewer
 ├── uvc-deviceinfo.py           # Device info utility
 ├── uvc-radiometry.py           # Radiometry utility
-├── uvctypes.py                 # UVC ctypes definitions
-├── saved_frames_test_2/        # Example output directory for frames
-├── standard-units.yaml         # Reference data
-└── lepton_instructions.txt     # Additional notes
-
+├── uvctypes.py                 # ctypes bindings/constants for libuvc
+└── libuvc/                     # libuvc source submodule
 ```
 
----
+## Prerequisites
 
-## 🔧 Prerequisites
+- Python 3.8+
+- `libuvc` installed and discoverable by the system loader
+- Python packages: `numpy`, `matplotlib`
 
-- **Python** ≥ 3.8  
-  Recommended: use a virtual environment (`python -m venv venv`)
-- **NumPy** ≥ 1.24
-- **OpenCV** (Python package, for image processing)
-- **Matplotlib** (optional, for plotting)
-- **libuvc** (system library, built from source)
-
-### Install Python dependencies
+## Setup
 
 ```bash
-pip install numpy opencv-python matplotlib
+cd /Users/sozodennis/Developer/epscor-c3m-flirlepton
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### Install libuvc (Linux/macOS)
+Install `libuvc` if needed:
 
 ```bash
-git clone https://github.com/libuvc/libuvc.git
+git submodule update --init --recursive
 cd libuvc
-mkdir build && cd build
+mkdir -p build && cd build
 cmake ..
-make && sudo make install      # installs libuvc and headers
-sudo ldconfig                  # Linux only
+make
+sudo make install
+sudo ldconfig   # Linux only
 ```
 
-> **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
+On macOS, `sudo` may be required to open the camera over `libusb`.
 
----
+## Quick Start
 
-## 🚀 Quick Start
+### 1) Capture a session to `.npy`
 
-1. **Plug in the Lepton** USB board.
-2. Open a terminal in the repo root and run:
+Capture by frame count:
 
 ```bash
-# Linux
-python3 readout.py
-
-# macOS
-sudo python3 readout.py         # macOS may require root for libusb/uvc_open
+python3 lepton-camera.py --max-frames 600 --output-dir captures
 ```
-> **Directory and File Name:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. Enter a custom name for the npz file (do not include  spaces or .npz)
 
-3. View saved frames:
+Capture by duration:
 
 ```bash
-python3 npz_viewer.py                                   # Standard viewer for .npz files
-
-# To export frames as .bin files see customization section before running these commands
-python3 binary_viewer.py                                # Standard viewer for .bin files (uses default save dir)
-# OR
-python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for .bin files (macOS/testing)
+python3 lepton-camera.py --duration-sec 120 --output-dir captures
 ```
-> **Directory:** Enter the directory number that has the .npz file you wish to view along with the file name. 
 
-4. Analyze temperature data:
+Manual VID/PID override:
 
 ```bash
-python3 temp_viewer.py          # Average Temperature Values 
+python3 lepton-camera.py --max-frames 300 --vid 0x1e4e --pid 0x0100
+```
 
-python3 compare_temp.py         # Average Temperature Difference 
-```                             
-> **Directory and File Name:** Enter the target directory number and name of the npz file that you wish to get temperature data from when prompted by the terminal. For `compare_temp.py` you will be prompted to enter in a directory and file name twice, once for each data set.
+Output naming format:
 
-> **Temperature Output:** For temp_viewer.py, you will see a heat map of the average temperature of 1 data set. For compare_temp.py, you will see a heat map of the absolute difference in temperature between your 2 data sets. Additionaly, in the terminal you will recieve the temperature difference array (120, 160) with red values having a statistically significant difference.
+- `lepton_frames_YYYYMMDD_HHMMSS_001.npy`
+- sidecar metadata: same basename with `.json`
 
----
+### 2) View and analyze `.npy`
 
-## 🖥️ Script Details
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy
+```
 
-- **readout.py** — Captures frames from the Lepton and saves as `.npz` file in a custom directory
-- **npz_viewer.py** - Loads and displays frames from `.npz` file. 
-- **binary_viewer.py** — Loads and displays frames from `.bin` files. Uses the default directory (defualt: `saved_frames_test_3`). Edit `SAVE_DIR` if needed.
-- **binary_viewer_dennisM1.py** — Custom viewer with command-line argument for directory. Useful for macOS or advanced testing.
-- **temp_viewer.py** - Calculates average temerature across all frames and displays heat map.
-- **compare_temp.py** - Compares average temperature between 2 datasets and displays heat map of difference.
-- **uvc-deviceinfo.py**, **uvc-radiometry.py** — Utilities for device info and radiometry.
+Plot-only mode (skip playback):
 
----
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --no-playback
+```
 
-## ⚙️ Customization
-- By default, `readout.py` will export frames as an `.npz` file. Changes to the program can be made to export frames to `.bin` files:
-    1. Un-comment line 144 to call save_frame_to_bin() function
-    ```bash
-    save_frame_to_bin(data, frame_count)
-    ```
-    2. Comment out line 213 to prevent frames from being saved as .npz files
-    ```bash
-    save_frame_to_npz(frame_list)
-    ```
-- To change which frames are displayed, edit the `SAVE_DIR` variable at the top of `binary_viewer.py`.
-- For unique filenames or directories, modify the scripts as needed.
+With hotspot detection:
 
----
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --sigma-threshold 2.5 --min-persistence 3
+```
 
-## 🛠️ Troubleshooting
+Absolute threshold example:
 
-- **Camera open error (`uvc_open_error`)**:
-  ```bash
-  # Linux quick test fix
-  sudo chmod -R 777 /dev/bus/usb/
-  python3 uvc-deviceinfo.py
-  python3 readout.py
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --abs-threshold 60
+```
 
-  # macOS
-  sudo python3 uvc-deviceinfo.py
-  sudo python3 readout.py
-  ```
-  > On recent macOS releases, libusb may need root (or USB capture entitlements) to detach the UVC kernel driver.
-  >
-  > On Linux, prefer a dedicated `udev` rule for persistent access instead of `chmod 777`.
+Combined thresholding:
 
-- **macOS notes:**
-  - Custom scripts (tagged `dennis`) allow additional command parameters for testing.
-  - Camera privacy prompts may not appear for this libusb/libuvc path because it does not use AVFoundation.
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --sigma-threshold 2.0 --abs-threshold 60 --threshold-mode all
+```
 
-- **Stopping a capture:** Press **Ctrl + C** in the terminal.
+Optional pixel trace:
 
----
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --pixel 80 60
+```
 
-## 📄 Additional Notes
+## CLI Help
 
-- All scripts are intended for research and prototyping. Review and adapt for production use as needed.
-- For more details, see `lepton_instructions.txt`.
+```bash
+python3 lepton-camera.py --help
+python3 view_lepton_npy.py --help
+```
+
+## Notes and TODO Stubs
+
+- GPS integration is stubbed in `view_lepton_npy.py` and marked with TODO comments.
+- Temperature conversion assumes Lepton 3.5 defaults (Radiometry ON, TLinear ON, 0.01 K), using `C = (raw / 100) - 273.15`.
+- Timeline axis uses frame index for now; TODO is present for real wall-clock conversion.
+
+## Troubleshooting
+
+- `uvc_open` access denied:
+  - macOS: run with `sudo`
+  - Linux: prefer a proper `udev` rule over broad permission changes
+- `libuvc` load failure:
+  - confirm `sudo make install` and library loader path setup
+- No hotspots detected:
+  - lower `--sigma-threshold`, use `--abs-threshold`, or lower `--min-persistence`
