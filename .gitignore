@@ -196,3 +196,4 @@ cython_debug/
 saved_frames_test_5/test.npz
 lepton_frames_*.npy
 lepton_frames_*.json
+captures/

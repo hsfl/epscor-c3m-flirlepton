@@ -6,8 +6,8 @@ Python toolkit for capturing and analyzing FLIR Lepton thermal data over USB usi
 
 This repo now includes an MVP pipeline that matches the Boson-style workflow while staying on a confirmed Lepton path (no OpenCV camera capture):
 
-- `lepton-camera.py`: capture Y16 thermal frames and save to `.npy`
-- `view_lepton_npy.py`: playback + hotspot analysis from `.npy`
+- `lepton-camera.py`: capture Y16 thermal frames and save to `.npy` (optional live preview with per-frame min/max Celsius overlay)
+- `view_lepton_npy.py`: playback + hotspot analysis from `.npy` (playback now shows per-frame min/max Celsius overlay)
 
 Legacy scripts are still present for prior workflows.
 
@@ -73,6 +73,18 @@ Capture by duration:
 python3 lepton-camera.py --duration-sec 120 --output-dir captures
 ```
 
+Capture with live preview window:
+
+```bash
+python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview
+```
+
+Use a different preview colormap:
+
+```bash
+python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview --preview-colormap magma
+```
+
 Manual VID/PID override:
 
 ```bash
@@ -89,6 +101,13 @@ Output naming format:
 ```bash
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy
 ```
+
+During playback, the overlay includes:
+
+- frame index
+- per-frame min temperature in Celsius
+- per-frame max temperature in Celsius
+- hotspot coordinates when detected
 
 Plot-only mode (skip playback):
 

@@ -15,6 +15,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+TLINEAR_SCALE = 100.0  # Lepton 3.5 default: raw centi-Kelvin (0.01 K)
+KELVIN_TO_CELSIUS_OFFSET = 273.15
+
 
 def parse_hex_or_int(value: str) -> int:
     value = value.strip().lower()
@@ -82,6 +85,49 @@ def save_session_metadata(metadata_path: Path, metadata: Dict) -> None:
         json.dump(metadata, f, indent=2)
 
 
+def raw_to_celsius(frame: np.ndarray) -> np.ndarray:
+    frame_f32 = frame.astype(np.float32, copy=False)
+    return (frame_f32 / TLINEAR_SCALE) - KELVIN_TO_CELSIUS_OFFSET
+
+
+def init_live_preview(colormap: str):
+    import matplotlib.pyplot as plt  # noqa: PLC0415
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.set_title("Lepton Live Preview (Celsius)")
+    placeholder = np.zeros((60, 80), dtype=np.float32)
+    image = ax.imshow(placeholder, cmap=colormap)
+    text = ax.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax.transAxes,
+        va="top",
+        color="white",
+        fontsize=10,
+        bbox=dict(facecolor="black", alpha=0.45, edgecolor="none", boxstyle="round,pad=0.25"),
+    )
+    plt.colorbar(image, ax=ax, label="Temperature (°C)")
+    plt.show(block=False)
+    return plt, fig, image, text
+
+
+def update_live_preview(plt, fig, image, text, frame_idx: int, frame_celsius: np.ndarray) -> bool:
+    if not plt.fignum_exists(fig.number):
+        return False
+
+    frame_min = float(frame_celsius.min())
+    frame_max = float(frame_celsius.max())
+    image.set_data(frame_celsius)
+    if frame_max > frame_min:
+        image.set_clim(frame_min, frame_max)
+
+    text.set_text(f"Frame {frame_idx} | Min {frame_min:.2f}°C | Max {frame_max:.2f}°C")
+    fig.canvas.draw_idle()
+    plt.pause(0.001)
+    return True
+
+
 def capture_frames(
     uvc,
     devh,
@@ -89,10 +135,13 @@ def capture_frames(
     max_frames: Optional[int],
     duration_sec: Optional[float],
     nominal_fps: float,
+    live_preview: bool,
+    preview_colormap: str,
 ) -> Tuple[List[np.ndarray], List[float], float]:
     frame_queue: Queue = Queue(maxsize=8)
     capture_start_monotonic = time.monotonic()
     frame_times: List[float] = []
+    plt = fig = image = text = None
 
     def py_frame_callback(frame, _userptr):
         if frame.contents.data_bytes != 2 * frame.contents.width * frame.contents.height:
@@ -119,6 +168,14 @@ def capture_frames(
 
     frames: List[np.ndarray] = []
     print("Streaming started. Press Ctrl+C to stop early.")
+    if live_preview:
+        print("Live preview enabled (Celsius min/max overlay).")
+        print("Conversion assumption: Lepton 3.5 TLinear ON at 0.01 K resolution.")
+        try:
+            plt, fig, image, text = init_live_preview(preview_colormap)
+        except Exception as exc:
+            print(f"Live preview disabled: failed to initialize plotting window ({exc})", file=sys.stderr)
+            live_preview = False
 
     try:
         while True:
@@ -137,6 +194,14 @@ def capture_frames(
 
             frames.append(frame)
             frame_times.append(ts)
+            frame_idx = len(frames) - 1
+
+            if live_preview and plt is not None and fig is not None and image is not None and text is not None:
+                frame_celsius = raw_to_celsius(frame)
+                still_open = update_live_preview(plt, fig, image, text, frame_idx, frame_celsius)
+                if not still_open:
+                    print("Live preview window closed; capture will continue without preview.")
+                    live_preview = False
 
             if len(frames) == 1 or len(frames) % max(1, int(nominal_fps)) == 0:
                 print(f"Captured {len(frames)} frame(s)")
@@ -145,6 +210,8 @@ def capture_frames(
         print("Capture interrupted by user.")
     finally:
         uvc.libuvc.uvc_stop_streaming(devh)
+        if plt is not None and fig is not None and plt.fignum_exists(fig.number):
+            plt.close(fig)
 
     capture_end_monotonic = time.monotonic()
     total_duration = max(0.0, capture_end_monotonic - capture_start_monotonic)
@@ -165,6 +232,16 @@ def main() -> int:
         "--print-device-info",
         action="store_true",
         help="Print detected device info and advertised stream formats",
+    )
+    parser.add_argument(
+        "--live-preview",
+        action="store_true",
+        help="Show live playback window with per-frame min/max Celsius while capturing",
+    )
+    parser.add_argument(
+        "--preview-colormap",
+        default="inferno",
+        help="Matplotlib colormap for live preview (used with --live-preview)",
     )
 
     args = parser.parse_args()
@@ -246,6 +323,8 @@ def main() -> int:
                 args.max_frames,
                 args.duration_sec,
                 nominal_fps,
+                args.live_preview,
+                args.preview_colormap,
             )
 
             if not frames:

@@ -144,20 +144,36 @@ def playback_frames(
     ax.set_title("Lepton Playback (Celsius)")
     image = ax.imshow(frames[0], cmap=colormap)
     marker, = ax.plot([], [], "ro", markersize=8, markerfacecolor="none", markeredgewidth=2)
-    text = ax.text(0.02, 0.98, "", transform=ax.transAxes, va="top", color="white", fontsize=10)
+    text = ax.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax.transAxes,
+        va="top",
+        color="white",
+        fontsize=10,
+        bbox=dict(facecolor="black", alpha=0.45, edgecolor="none", boxstyle="round,pad=0.25"),
+    )
     plt.colorbar(image, ax=ax, label="Temperature (°C)")
 
     frame_delay = 1.0 / max(fps, 1e-6)
+    frame_mins = frames.min(axis=(1, 2))
+    frame_maxs = frames.max(axis=(1, 2))
 
     for i in range(frames.shape[0]):
         image.set_data(frames[i])
+        min_c = float(frame_mins[i])
+        max_c = float(frame_maxs[i])
         if detections[i] and coords[i] is not None:
             x, y = coords[i]
             marker.set_data([x], [y])
-            text.set_text(f"Frame {i} | Hotspot @ ({x}, {y})")
+            text.set_text(
+                f"Frame {i} | Min {min_c:.2f}°C | Max {max_c:.2f}°C\n"
+                f"Hotspot @ ({x}, {y})"
+            )
         else:
             marker.set_data([], [])
-            text.set_text(f"Frame {i}")
+            text.set_text(f"Frame {i} | Min {min_c:.2f}°C | Max {max_c:.2f}°C")
 
         fig.canvas.draw_idle()
         if not plt.fignum_exists(fig.number):
