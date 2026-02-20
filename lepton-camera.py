@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 from ctypes import CFUNCTYPE, POINTER, byref, c_uint16, c_void_p, cast
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,44 @@ import numpy as np
 
 TLINEAR_SCALE = 100.0  # Lepton 3.5 default: raw centi-Kelvin (0.01 K)
 KELVIN_TO_CELSIUS_OFFSET = 273.15
+WILDFIRE_ABS_THRESHOLD_C = 300.0
+WILDFIRE_DELTA_THRESHOLD_C = 25.0
+WILDFIRE_SIGMA_THRESHOLD = None
+WILDFIRE_THRESHOLD_MODE = "all"
+
+
+@dataclass
+class HotspotThresholdState:
+    absolute_threshold: Optional[float]
+    delta_threshold: Optional[float]
+    sigma_threshold: Optional[float]
+    threshold_mode: str
+
+
+def resolve_hotspot_thresholds(
+    profile: str,
+    absolute_threshold: Optional[float],
+    delta_threshold: Optional[float],
+    sigma_threshold: Optional[float],
+    threshold_mode: str,
+) -> HotspotThresholdState:
+    if profile == "wildfire":
+        resolved_abs = WILDFIRE_ABS_THRESHOLD_C if absolute_threshold is None else absolute_threshold
+        resolved_delta = WILDFIRE_DELTA_THRESHOLD_C if delta_threshold is None else delta_threshold
+        resolved_sigma = WILDFIRE_SIGMA_THRESHOLD if sigma_threshold is None else sigma_threshold
+        resolved_mode = threshold_mode if threshold_mode else WILDFIRE_THRESHOLD_MODE
+        return HotspotThresholdState(
+            absolute_threshold=resolved_abs,
+            delta_threshold=resolved_delta,
+            sigma_threshold=resolved_sigma,
+            threshold_mode=resolved_mode,
+        )
+    return HotspotThresholdState(
+        absolute_threshold=absolute_threshold,
+        delta_threshold=delta_threshold,
+        sigma_threshold=sigma_threshold,
+        threshold_mode=threshold_mode,
+    )
 
 
 def parse_hex_or_int(value: str) -> int:
@@ -90,6 +129,42 @@ def raw_to_celsius(frame: np.ndarray) -> np.ndarray:
     return (frame_f32 / TLINEAR_SCALE) - KELVIN_TO_CELSIUS_OFFSET
 
 
+def detect_hotspot_in_frame(
+    frame_celsius: np.ndarray,
+    thresholds: HotspotThresholdState,
+) -> Optional[Tuple[int, int, float]]:
+    frame_mean = float(frame_celsius.mean())
+    frame_std = float(frame_celsius.std())
+    frame_median = float(np.median(frame_celsius))
+
+    masks: List[np.ndarray] = []
+    if thresholds.sigma_threshold is not None:
+        sigma_cutoff = frame_mean + thresholds.sigma_threshold * frame_std
+        masks.append(frame_celsius >= sigma_cutoff)
+    if thresholds.absolute_threshold is not None:
+        masks.append(frame_celsius >= thresholds.absolute_threshold)
+    if thresholds.delta_threshold is not None:
+        masks.append(frame_celsius >= (frame_median + thresholds.delta_threshold))
+
+    if not masks:
+        return None
+
+    mask = masks[0]
+    for candidate in masks[1:]:
+        if thresholds.threshold_mode == "all":
+            mask = np.logical_and(mask, candidate)
+        else:
+            mask = np.logical_or(mask, candidate)
+
+    if not mask.any():
+        return None
+
+    masked_frame = np.where(mask, frame_celsius, -np.inf)
+    flat_idx = int(np.argmax(masked_frame))
+    y, x = np.unravel_index(flat_idx, frame_celsius.shape)
+    return int(x), int(y), float(frame_celsius[y, x])
+
+
 def init_live_preview(colormap: str):
     import matplotlib.pyplot as plt  # noqa: PLC0415
 
@@ -97,6 +172,16 @@ def init_live_preview(colormap: str):
     ax.set_title("Lepton Live Preview (Celsius)")
     placeholder = np.zeros((60, 80), dtype=np.float32)
     image = ax.imshow(placeholder, cmap=colormap)
+    marker, = ax.plot(
+        [],
+        [],
+        marker="x",
+        linestyle="None",
+        color="red",
+        markeredgewidth=2,
+        markersize=9,
+        label="Threshold hotspot",
+    )
     text = ax.text(
         0.02,
         0.98,
@@ -107,12 +192,28 @@ def init_live_preview(colormap: str):
         fontsize=10,
         bbox=dict(facecolor="black", alpha=0.45, edgecolor="none", boxstyle="round,pad=0.25"),
     )
+    ax.legend(loc="upper right")
     plt.colorbar(image, ax=ax, label="Temperature (°C)")
     plt.show(block=False)
-    return plt, fig, image, text
+    return plt, fig, image, marker, text
 
 
-def update_live_preview(plt, fig, image, text, frame_idx: int, frame_celsius: np.ndarray) -> bool:
+def format_threshold_value(value: Optional[float], unit: str) -> str:
+    if value is None:
+        return "off"
+    return f"{value:.1f}{unit}"
+
+
+def update_live_preview(
+    plt,
+    fig,
+    image,
+    marker,
+    text,
+    frame_idx: int,
+    frame_celsius: np.ndarray,
+    thresholds: HotspotThresholdState,
+) -> bool:
     if not plt.fignum_exists(fig.number):
         return False
 
@@ -122,7 +223,27 @@ def update_live_preview(plt, fig, image, text, frame_idx: int, frame_celsius: np
     if frame_max > frame_min:
         image.set_clim(frame_min, frame_max)
 
-    text.set_text(f"Frame {frame_idx} | Min {frame_min:.2f}°C | Max {frame_max:.2f}°C")
+    hotspot = detect_hotspot_in_frame(frame_celsius, thresholds)
+    if hotspot is not None:
+        hx, hy, htemp = hotspot
+        marker.set_data([hx], [hy])
+        hotspot_text = f"Hotspot=({hx}, {hy}) {htemp:.2f}°C"
+    else:
+        marker.set_data([], [])
+        hotspot_text = "Hotspot=none"
+
+    threshold_text = (
+        f"abs={format_threshold_value(thresholds.absolute_threshold, 'C')} "
+        f"delta={format_threshold_value(thresholds.delta_threshold, 'C')} "
+        f"sigma={format_threshold_value(thresholds.sigma_threshold, '')} "
+        f"mode={thresholds.threshold_mode}"
+    )
+    text.set_text(
+        f"Frame {frame_idx} | Min {frame_min:.2f}°C | Max {frame_max:.2f}°C\n"
+        f"{hotspot_text}\n"
+        f"{threshold_text}\n"
+        "Keys: [/]=abs  ,/.=delta  -/+=sigma  m=mode"
+    )
     fig.canvas.draw_idle()
     plt.pause(0.001)
     return True
@@ -137,11 +258,18 @@ def capture_frames(
     nominal_fps: float,
     live_preview: bool,
     preview_colormap: str,
+    hotspot_thresholds: HotspotThresholdState,
 ) -> Tuple[List[np.ndarray], List[float], float]:
     frame_queue: Queue = Queue(maxsize=8)
     capture_start_monotonic = time.monotonic()
     frame_times: List[float] = []
-    plt = fig = image = text = None
+    plt = fig = image = marker = text = None
+    threshold_state = HotspotThresholdState(
+        absolute_threshold=hotspot_thresholds.absolute_threshold,
+        delta_threshold=hotspot_thresholds.delta_threshold,
+        sigma_threshold=hotspot_thresholds.sigma_threshold,
+        threshold_mode=hotspot_thresholds.threshold_mode,
+    )
 
     def py_frame_callback(frame, _userptr):
         if frame.contents.data_bytes != 2 * frame.contents.width * frame.contents.height:
@@ -171,8 +299,42 @@ def capture_frames(
     if live_preview:
         print("Live preview enabled (Celsius min/max overlay).")
         print("Conversion assumption: Lepton 3.5 TLinear ON at 0.01 K resolution.")
+        print(
+            "Hotspot thresholds: "
+            f"abs={threshold_state.absolute_threshold}C "
+            f"delta={threshold_state.delta_threshold}C "
+            f"sigma={threshold_state.sigma_threshold} "
+            f"mode={threshold_state.threshold_mode}"
+        )
         try:
-            plt, fig, image, text = init_live_preview(preview_colormap)
+            plt, fig, image, marker, text = init_live_preview(preview_colormap)
+
+            def on_key(event):
+                key = event.key
+                if key is None:
+                    return
+                if key == "[":
+                    if threshold_state.absolute_threshold is not None:
+                        threshold_state.absolute_threshold = max(0.0, threshold_state.absolute_threshold - 10.0)
+                elif key == "]":
+                    base = threshold_state.absolute_threshold if threshold_state.absolute_threshold is not None else WILDFIRE_ABS_THRESHOLD_C
+                    threshold_state.absolute_threshold = base + 10.0
+                elif key == ",":
+                    if threshold_state.delta_threshold is not None:
+                        threshold_state.delta_threshold = max(0.0, threshold_state.delta_threshold - 2.0)
+                elif key == ".":
+                    base = threshold_state.delta_threshold if threshold_state.delta_threshold is not None else WILDFIRE_DELTA_THRESHOLD_C
+                    threshold_state.delta_threshold = base + 2.0
+                elif key == "-":
+                    if threshold_state.sigma_threshold is not None:
+                        threshold_state.sigma_threshold = max(0.0, threshold_state.sigma_threshold - 0.25)
+                elif key in ("+", "="):
+                    base = threshold_state.sigma_threshold if threshold_state.sigma_threshold is not None else 2.5
+                    threshold_state.sigma_threshold = base + 0.25
+                elif key.lower() == "m":
+                    threshold_state.threshold_mode = "any" if threshold_state.threshold_mode == "all" else "all"
+
+            fig.canvas.mpl_connect("key_press_event", on_key)
         except Exception as exc:
             print(f"Live preview disabled: failed to initialize plotting window ({exc})", file=sys.stderr)
             live_preview = False
@@ -196,9 +358,9 @@ def capture_frames(
             frame_times.append(ts)
             frame_idx = len(frames) - 1
 
-            if live_preview and plt is not None and fig is not None and image is not None and text is not None:
+            if live_preview and plt is not None and fig is not None and image is not None and marker is not None and text is not None:
                 frame_celsius = raw_to_celsius(frame)
-                still_open = update_live_preview(plt, fig, image, text, frame_idx, frame_celsius)
+                still_open = update_live_preview(plt, fig, image, marker, text, frame_idx, frame_celsius, threshold_state)
                 if not still_open:
                     print("Live preview window closed; capture will continue without preview.")
                     live_preview = False
@@ -243,6 +405,21 @@ def main() -> int:
         default="inferno",
         help="Matplotlib colormap for live preview (used with --live-preview)",
     )
+    parser.add_argument(
+        "--hotspot-profile",
+        choices=["none", "wildfire"],
+        default="wildfire",
+        help="Hotspot threshold preset for live preview focus",
+    )
+    parser.add_argument("--hotspot-abs-threshold", type=float, default=None, help="Hotspot absolute threshold in Celsius")
+    parser.add_argument("--hotspot-delta-threshold", type=float, default=None, help="Hotspot threshold above frame median in Celsius")
+    parser.add_argument("--hotspot-sigma-threshold", type=float, default=None, help="Hotspot threshold as mean + sigma*std")
+    parser.add_argument(
+        "--hotspot-threshold-mode",
+        choices=["any", "all"],
+        default=WILDFIRE_THRESHOLD_MODE,
+        help="How to combine hotspot thresholds when more than one is enabled",
+    )
 
     args = parser.parse_args()
 
@@ -260,6 +437,13 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = create_filename(output_dir, args.prefix)
     metadata_path = output_path.with_suffix(".json")
+    hotspot_thresholds = resolve_hotspot_thresholds(
+        profile=args.hotspot_profile,
+        absolute_threshold=args.hotspot_abs_threshold,
+        delta_threshold=args.hotspot_delta_threshold,
+        sigma_threshold=args.hotspot_sigma_threshold,
+        threshold_mode=args.hotspot_threshold_mode,
+    )
 
     try:
         uvc = load_uvc_module()
@@ -325,6 +509,7 @@ def main() -> int:
                 nominal_fps,
                 args.live_preview,
                 args.preview_colormap,
+                hotspot_thresholds,
             )
 
             if not frames:
@@ -355,6 +540,13 @@ def main() -> int:
                     "vid": f"0x{used_vid:04x}",
                     "pid": f"0x{used_pid:04x}",
                     "format": "Y16",
+                },
+                "hotspot_thresholds": {
+                    "profile": args.hotspot_profile,
+                    "absolute_threshold_c": hotspot_thresholds.absolute_threshold,
+                    "delta_threshold_c": hotspot_thresholds.delta_threshold,
+                    "sigma_threshold": hotspot_thresholds.sigma_threshold,
+                    "mode": hotspot_thresholds.threshold_mode,
                 },
                 "frame_time_offsets_sec": rel_frame_times,
                 "frames_file": output_path.name,

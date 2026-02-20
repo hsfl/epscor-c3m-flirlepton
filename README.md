@@ -81,11 +81,22 @@ Capture with live preview window:
 python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview
 ```
 
+`--hotspot-profile wildfire` is the default. It applies fire-focused hotspot thresholds:
+- absolute floor: `300C`
+- distinctness floor: `frame_median + 25C`
+- combine mode: `all`
+
 Use a different preview colormap:
 
 ```bash
 python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview --preview-colormap magma
 ```
+
+Tune live preview thresholds on-the-fly (while preview window is focused):
+- `[` / `]`: decrease / increase absolute threshold (`10C` step)
+- `,` / `.`: decrease / increase delta-over-background threshold (`2C` step)
+- `-` / `+`: decrease / increase sigma threshold (`0.25` step)
+- `m`: toggle threshold combine mode (`any`/`all`)
 
 Manual VID/PID override:
 
@@ -103,6 +114,8 @@ Output naming format:
 ```bash
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy
 ```
+
+By default, analysis also uses `--profile wildfire` (`abs=300C`, `delta=25C`, `mode=all`).
 
 During playback, the overlay includes:
 
@@ -135,6 +148,12 @@ Combined thresholding:
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --sigma-threshold 2.0 --abs-threshold 60 --threshold-mode all
 ```
 
+Fire-focused custom thresholding example:
+
+```bash
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --profile wildfire --abs-threshold 320 --delta-threshold 35 --min-persistence 3
+```
+
 Optional pixel trace:
 
 ```bash
@@ -150,6 +169,12 @@ Interactive review controls (analysis figure):
 - if timestamp metadata is unavailable/invalid, x-axis falls back to frame index
 - preview overlays always show the frame max pixel marker
 - preview overlays also show the threshold hotspot marker when detection is present
+- threshold controls while analysis window is focused:
+  - `[` / `]`: decrease / increase absolute threshold (`10C` step)
+  - `,` / `.`: decrease / increase delta-over-background threshold (`2C` step)
+  - `-` / `+`: decrease / increase sigma threshold (`0.25` step)
+  - `m`: toggle threshold combine mode (`any`/`all`)
+  - `n` / `N`: decrease / increase persistence length
 
 ### 3) Quickly preview and rename capture files (GUI)
 

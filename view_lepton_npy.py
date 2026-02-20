@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -13,6 +14,44 @@ import numpy as np
 
 TLINEAR_SCALE = 100.0  # Lepton 3.5 default: raw centi-Kelvin (0.01 K)
 KELVIN_TO_CELSIUS_OFFSET = 273.15
+WILDFIRE_ABS_THRESHOLD_C = 300.0
+WILDFIRE_DELTA_THRESHOLD_C = 25.0
+WILDFIRE_SIGMA_THRESHOLD = None
+WILDFIRE_THRESHOLD_MODE = "all"
+
+
+@dataclass
+class HotspotThresholdState:
+    absolute_threshold: Optional[float]
+    delta_threshold: Optional[float]
+    sigma_threshold: Optional[float]
+    threshold_mode: str
+
+
+def resolve_hotspot_thresholds(
+    profile: str,
+    absolute_threshold: Optional[float],
+    delta_threshold: Optional[float],
+    sigma_threshold: Optional[float],
+    threshold_mode: str,
+) -> HotspotThresholdState:
+    if profile == "wildfire":
+        resolved_abs = WILDFIRE_ABS_THRESHOLD_C if absolute_threshold is None else absolute_threshold
+        resolved_delta = WILDFIRE_DELTA_THRESHOLD_C if delta_threshold is None else delta_threshold
+        resolved_sigma = WILDFIRE_SIGMA_THRESHOLD if sigma_threshold is None else sigma_threshold
+        resolved_mode = threshold_mode if threshold_mode else WILDFIRE_THRESHOLD_MODE
+        return HotspotThresholdState(
+            absolute_threshold=resolved_abs,
+            delta_threshold=resolved_delta,
+            sigma_threshold=resolved_sigma,
+            threshold_mode=resolved_mode,
+        )
+    return HotspotThresholdState(
+        absolute_threshold=absolute_threshold,
+        delta_threshold=delta_threshold,
+        sigma_threshold=sigma_threshold,
+        threshold_mode=threshold_mode,
+    )
 
 
 def load_frames(path: Path) -> np.ndarray:
@@ -107,6 +146,7 @@ def detect_hotspots(
     frames: np.ndarray,
     sigma_threshold: Optional[float],
     absolute_threshold: Optional[float],
+    delta_threshold: Optional[float],
     threshold_mode: str,
 ) -> Tuple[np.ndarray, List[Optional[Tuple[int, int]]], np.ndarray]:
     n_frames = frames.shape[0]
@@ -118,23 +158,26 @@ def detect_hotspots(
         frame = frames[i]
         frame_mean = float(frame.mean())
         frame_std = float(frame.std())
+        frame_median = float(np.median(frame))
 
-        sigma_mask = None
+        masks: List[np.ndarray] = []
         if sigma_threshold is not None:
             sigma_cutoff = frame_mean + sigma_threshold * frame_std
-            sigma_mask = frame >= sigma_cutoff
-
-        abs_mask = None
+            masks.append(frame >= sigma_cutoff)
         if absolute_threshold is not None:
-            abs_mask = frame >= absolute_threshold
+            masks.append(frame >= absolute_threshold)
+        if delta_threshold is not None:
+            masks.append(frame >= (frame_median + delta_threshold))
 
-        if sigma_mask is None and abs_mask is None:
+        if not masks:
             continue
 
-        if sigma_mask is not None and abs_mask is not None:
-            mask = np.logical_or(sigma_mask, abs_mask) if threshold_mode == "any" else np.logical_and(sigma_mask, abs_mask)
-        else:
-            mask = sigma_mask if sigma_mask is not None else abs_mask
+        mask = masks[0]
+        for candidate in masks[1:]:
+            if threshold_mode == "all":
+                mask = np.logical_and(mask, candidate)
+            else:
+                mask = np.logical_or(mask, candidate)
 
         if mask is None or not mask.any():
             continue
@@ -235,16 +278,14 @@ def plot_analysis(
     means: np.ndarray,
     mins: np.ndarray,
     maxs: np.ndarray,
-    detections: np.ndarray,
-    coords: Sequence[Optional[Tuple[int, int]]],
-    peak_values: np.ndarray,
+    initial_thresholds: HotspotThresholdState,
+    min_persistence: int,
     pixel: Optional[Tuple[int, int]],
     colormap: str,
     x_seconds: Optional[np.ndarray],
     x_datetimes_local: Optional[np.ndarray],
 ) -> None:
     n_frames = frames.shape[0]
-    hotspot_indices = np.flatnonzero(detections)
     max_xs, max_ys, max_values = compute_frame_max_coords(frames)
     use_timestamps = (
         x_seconds is not None
@@ -269,8 +310,7 @@ def plot_analysis(
     ax_stats.plot(x_plot, mins, label="Min", color="tab:green")
     ax_stats.plot(x_plot, maxs, label="Max", color="tab:orange")
 
-    if hotspot_indices.size > 0:
-        ax_stats.scatter(x_plot[hotspot_indices], peak_values[hotspot_indices], color="red", s=20, label="Hotspot frame")
+    hotspot_scatter = ax_stats.scatter([], [], color="red", s=20, label="Hotspot frame")
 
     ax_stats.set_title("Temporal Statistics (Celsius)")
     ax_stats.set_xlabel("Local capture time (HH:MM:SS)" if use_timestamps else "Frame index")
@@ -347,7 +387,49 @@ def plot_analysis(
         "active_idx": preview_idx,
         "locked": False,
         "last_hover_xy": None,
+        "thresholds": HotspotThresholdState(
+            absolute_threshold=initial_thresholds.absolute_threshold,
+            delta_threshold=initial_thresholds.delta_threshold,
+            sigma_threshold=initial_thresholds.sigma_threshold,
+            threshold_mode=initial_thresholds.threshold_mode,
+        ),
+        "min_persistence": max(1, int(min_persistence)),
+        "detections": np.zeros(n_frames, dtype=bool),
+        "coords": [None] * n_frames,
+        "peak_values": np.full(n_frames, np.nan, dtype=np.float64),
     }
+
+    def recompute_detections() -> None:
+        thresholds = state["thresholds"]
+        detections_raw, coords_raw, peak_values_raw = detect_hotspots(
+            frames,
+            sigma_threshold=thresholds.sigma_threshold,
+            absolute_threshold=thresholds.absolute_threshold,
+            delta_threshold=thresholds.delta_threshold,
+            threshold_mode=thresholds.threshold_mode,
+        )
+        detections = apply_persistence_filter(detections_raw, state["min_persistence"])
+        coords: List[Optional[Tuple[int, int]]] = [None] * len(coords_raw)
+        peak_values = np.full_like(peak_values_raw, np.nan)
+        for i, detected in enumerate(detections):
+            if detected and coords_raw[i] is not None:
+                coords[i] = coords_raw[i]
+                peak_values[i] = peak_values_raw[i]
+        state["detections"] = detections
+        state["coords"] = coords
+        state["peak_values"] = peak_values
+
+        hotspot_indices = np.flatnonzero(detections)
+        if hotspot_indices.size > 0:
+            offsets = np.column_stack((x_plot[hotspot_indices], peak_values[hotspot_indices]))
+            hotspot_scatter.set_offsets(offsets)
+        else:
+            hotspot_scatter.set_offsets(np.empty((0, 2)))
+
+    def format_threshold_value(value: Optional[float], unit: str) -> str:
+        if value is None:
+            return "off"
+        return f"{value:.1f}{unit}"
 
     def update_active_frame(idx: int, source_xy: Optional[Tuple[float, float]] = None) -> None:
         idx = int(np.clip(idx, 0, n_frames - 1))
@@ -369,7 +451,7 @@ def plot_analysis(
         max_marker.set_data([max_x], [max_y])
         preview_text.set_text(f"Frame {idx} | Max {max_temp:.2f}°C")
 
-        detection = coords[idx]
+        detection = state["coords"][idx]
         if detection is not None:
             det_x, det_y = detection
             detection_marker.set_data([det_x], [det_y])
@@ -397,11 +479,21 @@ def plot_analysis(
             time_text = f"Local time={x_datetimes_local[idx].strftime('%Y-%m-%d %H:%M:%S')}"
         else:
             time_text = "Local time=n/a"
+        thresholds = state["thresholds"]
+        threshold_text = (
+            f"abs={format_threshold_value(thresholds.absolute_threshold, 'C')} "
+            f"delta={format_threshold_value(thresholds.delta_threshold, 'C')} "
+            f"sigma={format_threshold_value(thresholds.sigma_threshold, '')} "
+            f"mode={thresholds.threshold_mode} "
+            f"persist={state['min_persistence']}"
+        )
         status_text.set_text(
             f"Frame {idx} | lock={lock_text} | {hover_text}\n"
             f"{time_text}\n"
+            f"{threshold_text}\n"
             f"Min/Mean/Max={mins[idx]:.2f}/{means[idx]:.2f}/{maxs[idx]:.2f} °C\n"
-            f"Frame max=({max_x}, {max_y}) {max_temp:.2f}°C | {detection_text}"
+            f"Frame max=({max_x}, {max_y}) {max_temp:.2f}°C | {detection_text}\n"
+            "Keys: [/]=abs  ,/.=delta  -/+=sigma  m=mode  n/N=persist"
         )
         fig.canvas.draw_idle()
 
@@ -434,8 +526,55 @@ def plot_analysis(
             state["locked"] = True
         update_active_frame(idx, source_xy=(float(event.xdata), y_value))
 
+    def on_key(event) -> None:
+        key = event.key
+        if key is None:
+            return
+        thresholds = state["thresholds"]
+        changed = False
+
+        if key == "[":
+            if thresholds.absolute_threshold is not None:
+                thresholds.absolute_threshold = max(0.0, thresholds.absolute_threshold - 10.0)
+                changed = True
+        elif key == "]":
+            base = thresholds.absolute_threshold if thresholds.absolute_threshold is not None else WILDFIRE_ABS_THRESHOLD_C
+            thresholds.absolute_threshold = base + 10.0
+            changed = True
+        elif key == ",":
+            if thresholds.delta_threshold is not None:
+                thresholds.delta_threshold = max(0.0, thresholds.delta_threshold - 2.0)
+                changed = True
+        elif key == ".":
+            base = thresholds.delta_threshold if thresholds.delta_threshold is not None else WILDFIRE_DELTA_THRESHOLD_C
+            thresholds.delta_threshold = base + 2.0
+            changed = True
+        elif key == "-":
+            if thresholds.sigma_threshold is not None:
+                thresholds.sigma_threshold = max(0.0, thresholds.sigma_threshold - 0.25)
+                changed = True
+        elif key in ("+", "="):
+            base = thresholds.sigma_threshold if thresholds.sigma_threshold is not None else 2.5
+            thresholds.sigma_threshold = base + 0.25
+            changed = True
+        elif key.lower() == "m":
+            thresholds.threshold_mode = "any" if thresholds.threshold_mode == "all" else "all"
+            changed = True
+        elif key == "n":
+            state["min_persistence"] = max(1, state["min_persistence"] - 1)
+            changed = True
+        elif key == "N":
+            state["min_persistence"] += 1
+            changed = True
+
+        if changed:
+            recompute_detections()
+            update_active_frame(state["active_idx"])
+
     fig.canvas.mpl_connect("motion_notify_event", on_motion)
     fig.canvas.mpl_connect("button_press_event", on_click)
+    fig.canvas.mpl_connect("key_press_event", on_key)
+    recompute_detections()
     update_active_frame(preview_idx)
 
     plt.show()
@@ -446,8 +585,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("input", help="Path to .npy file generated by lepton-camera.py")
     parser.add_argument("--fps", type=float, default=None, help="Playback FPS override (default: metadata estimated_fps, then 8.0)")
     parser.add_argument("--colormap", default="inferno", help="Matplotlib colormap for thermal display")
+    parser.add_argument("--profile", choices=["none", "wildfire"], default="wildfire", help="Hotspot threshold preset")
     parser.add_argument("--sigma-threshold", type=float, default=None, help="Detect hotspots above mean + sigma*std per frame (Celsius)")
     parser.add_argument("--abs-threshold", type=float, default=None, help="Detect hotspots above absolute Celsius threshold")
+    parser.add_argument("--delta-threshold", type=float, default=None, help="Detect hotspots above frame median + delta (Celsius)")
     parser.add_argument(
         "--threshold-mode",
         choices=["any", "all"],
@@ -497,15 +638,23 @@ def main() -> int:
             return 2
 
     means, mins, maxs = compute_temporal_stats(temp_frames)
+    thresholds = resolve_hotspot_thresholds(
+        profile=args.profile,
+        absolute_threshold=args.abs_threshold,
+        delta_threshold=args.delta_threshold,
+        sigma_threshold=args.sigma_threshold,
+        threshold_mode=args.threshold_mode,
+    )
 
-    if args.sigma_threshold is None and args.abs_threshold is None:
+    if thresholds.sigma_threshold is None and thresholds.absolute_threshold is None and thresholds.delta_threshold is None:
         print("No hotspot threshold configured. Set --sigma-threshold and/or --abs-threshold to enable detections.")
 
     detections_raw, coords_raw, peak_values_raw = detect_hotspots(
         temp_frames,
-        sigma_threshold=args.sigma_threshold,
-        absolute_threshold=args.abs_threshold,
-        threshold_mode=args.threshold_mode,
+        sigma_threshold=thresholds.sigma_threshold,
+        absolute_threshold=thresholds.absolute_threshold,
+        delta_threshold=thresholds.delta_threshold,
+        threshold_mode=thresholds.threshold_mode,
     )
     detections = apply_persistence_filter(detections_raw, max(1, args.min_persistence))
 
@@ -526,6 +675,15 @@ def main() -> int:
 
     print(f"Hotspot frames: {int(detections.sum())} / {len(detections)}")
     print(f"Hotspot events (after persistence filter): {event_count}")
+    print(
+        "Thresholds: "
+        f"profile={args.profile} "
+        f"abs={thresholds.absolute_threshold}C "
+        f"delta={thresholds.delta_threshold}C "
+        f"sigma={thresholds.sigma_threshold} "
+        f"mode={thresholds.threshold_mode} "
+        f"min_persistence={max(1, args.min_persistence)}"
+    )
 
     if not args.no_playback:
         playback_frames(temp_frames, detections, coords, playback_fps, args.colormap)
@@ -535,9 +693,8 @@ def main() -> int:
         means,
         mins,
         maxs,
-        detections,
-        coords,
-        np.nan_to_num(peak_values, nan=means),
+        thresholds,
+        max(1, args.min_persistence),
         tuple(args.pixel) if args.pixel is not None else None,
         args.colormap,
         x_seconds,
