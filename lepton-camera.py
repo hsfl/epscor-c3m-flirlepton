@@ -22,6 +22,8 @@ WILDFIRE_ABS_THRESHOLD_C = 300.0
 WILDFIRE_DELTA_THRESHOLD_C = 25.0
 WILDFIRE_SIGMA_THRESHOLD = None
 WILDFIRE_THRESHOLD_MODE = "all"
+DISPLAY_MODE_CHOICES = ("percentile", "minmax", "fixed", "global")
+DISPLAY_WINDOW_EPSILON_C = 0.01
 
 
 @dataclass
@@ -30,6 +32,129 @@ class HotspotThresholdState:
     delta_threshold: Optional[float]
     sigma_threshold: Optional[float]
     threshold_mode: str
+
+
+@dataclass
+class DisplayWindowState:
+    mode: str
+    pct_low: float
+    pct_high: float
+    fixed_min_c: Optional[float]
+    fixed_max_c: Optional[float]
+    manual_floor_c: Optional[float] = None
+    manual_ceiling_c: Optional[float] = None
+    global_min_c: Optional[float] = None
+    global_max_c: Optional[float] = None
+
+
+def clamp_percentiles(low: float, high: float) -> Tuple[float, float]:
+    low = float(np.clip(low, 0.0, 100.0))
+    high = float(np.clip(high, 0.0, 100.0))
+    if high <= low:
+        low, high = 1.0, 99.0
+    return low, high
+
+
+def ensure_valid_window(vmin: float, vmax: float) -> Tuple[float, float]:
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        return 0.0, 1.0
+    if vmax <= vmin:
+        center = 0.5 * (vmin + vmax)
+        return center - DISPLAY_WINDOW_EPSILON_C, center + DISPLAY_WINDOW_EPSILON_C
+    return float(vmin), float(vmax)
+
+
+def compute_display_window(frame: np.ndarray, state: DisplayWindowState) -> Tuple[float, float]:
+    frame_min = float(np.min(frame))
+    frame_max = float(np.max(frame))
+    pct_low, pct_high = clamp_percentiles(state.pct_low, state.pct_high)
+    pct_vmin, pct_vmax = np.percentile(frame, [pct_low, pct_high]).astype(np.float64)
+
+    if state.mode == "minmax":
+        base_vmin, base_vmax = frame_min, frame_max
+    elif state.mode == "fixed":
+        if (
+            state.fixed_min_c is not None
+            and state.fixed_max_c is not None
+            and np.isfinite(state.fixed_min_c)
+            and np.isfinite(state.fixed_max_c)
+            and state.fixed_max_c > state.fixed_min_c
+        ):
+            base_vmin, base_vmax = float(state.fixed_min_c), float(state.fixed_max_c)
+        else:
+            base_vmin, base_vmax = float(pct_vmin), float(pct_vmax)
+    elif state.mode == "global":
+        if (
+            state.global_min_c is not None
+            and state.global_max_c is not None
+            and np.isfinite(state.global_min_c)
+            and np.isfinite(state.global_max_c)
+            and state.global_max_c > state.global_min_c
+        ):
+            base_vmin, base_vmax = float(state.global_min_c), float(state.global_max_c)
+        else:
+            base_vmin, base_vmax = float(pct_vmin), float(pct_vmax)
+    else:
+        base_vmin, base_vmax = float(pct_vmin), float(pct_vmax)
+
+    vmin = float(state.manual_floor_c) if state.manual_floor_c is not None else base_vmin
+    vmax = float(state.manual_ceiling_c) if state.manual_ceiling_c is not None else base_vmax
+    return ensure_valid_window(vmin, vmax)
+
+
+def cycle_display_mode(mode: str) -> str:
+    if mode not in DISPLAY_MODE_CHOICES:
+        return DISPLAY_MODE_CHOICES[0]
+    idx = DISPLAY_MODE_CHOICES.index(mode)
+    return DISPLAY_MODE_CHOICES[(idx + 1) % len(DISPLAY_MODE_CHOICES)]
+
+
+def nudge_display_floor(state: DisplayWindowState, frame: np.ndarray, delta_c: float) -> None:
+    cur_vmin, cur_vmax = compute_display_window(frame, state)
+    base_floor = state.manual_floor_c if state.manual_floor_c is not None else cur_vmin
+    new_floor = float(base_floor + delta_c)
+    if new_floor >= cur_vmax:
+        new_floor = cur_vmax - DISPLAY_WINDOW_EPSILON_C
+    state.manual_floor_c = new_floor
+
+
+def nudge_display_ceiling(state: DisplayWindowState, frame: np.ndarray, delta_c: float) -> None:
+    cur_vmin, cur_vmax = compute_display_window(frame, state)
+    base_ceiling = state.manual_ceiling_c if state.manual_ceiling_c is not None else cur_vmax
+    new_ceiling = float(base_ceiling + delta_c)
+    if new_ceiling <= cur_vmin:
+        new_ceiling = cur_vmin + DISPLAY_WINDOW_EPSILON_C
+    state.manual_ceiling_c = new_ceiling
+
+
+def format_display_state(state: DisplayWindowState, vmin: float, vmax: float) -> str:
+    mode_text = state.mode
+    if state.mode == "percentile":
+        mode_text = f"{state.mode}({state.pct_low:.1f}-{state.pct_high:.1f}%)"
+    elif state.mode == "fixed":
+        if state.fixed_min_c is not None and state.fixed_max_c is not None:
+            mode_text = f"{state.mode}({state.fixed_min_c:.1f},{state.fixed_max_c:.1f}C)"
+        else:
+            mode_text = f"{state.mode}(fallback=percentile)"
+    return f"display={mode_text} win={vmin:.2f}-{vmax:.2f}C"
+
+
+def build_display_state(
+    mode: str,
+    pct_low: float,
+    pct_high: float,
+    fixed_min_c: Optional[float],
+    fixed_max_c: Optional[float],
+) -> DisplayWindowState:
+    resolved_mode = mode if mode in DISPLAY_MODE_CHOICES else "percentile"
+    resolved_pct_low, resolved_pct_high = clamp_percentiles(pct_low, pct_high)
+    return DisplayWindowState(
+        mode=resolved_mode,
+        pct_low=resolved_pct_low,
+        pct_high=resolved_pct_high,
+        fixed_min_c=fixed_min_c,
+        fixed_max_c=fixed_max_c,
+    )
 
 
 def resolve_hotspot_thresholds(
@@ -213,6 +338,7 @@ def update_live_preview(
     frame_idx: int,
     frame_celsius: np.ndarray,
     thresholds: HotspotThresholdState,
+    display_state: DisplayWindowState,
 ) -> bool:
     if not plt.fignum_exists(fig.number):
         return False
@@ -220,8 +346,8 @@ def update_live_preview(
     frame_min = float(frame_celsius.min())
     frame_max = float(frame_celsius.max())
     image.set_data(frame_celsius)
-    if frame_max > frame_min:
-        image.set_clim(frame_min, frame_max)
+    vmin, vmax = compute_display_window(frame_celsius, display_state)
+    image.set_clim(vmin, vmax)
 
     hotspot = detect_hotspot_in_frame(frame_celsius, thresholds)
     if hotspot is not None:
@@ -241,8 +367,9 @@ def update_live_preview(
     text.set_text(
         f"Frame {frame_idx} | Min {frame_min:.2f}°C | Max {frame_max:.2f}°C\n"
         f"{hotspot_text}\n"
+        f"{format_display_state(display_state, vmin, vmax)}\n"
         f"{threshold_text}\n"
-        "Keys: [/]=abs  ,/.=delta  -/+=sigma  m=mode"
+        "Keys: [/]=abs  ,/.=delta  -/+=sigma  m=mode  f/F=floor  c/C=ceil  v=disp  r=reset"
     )
     fig.canvas.draw_idle()
     plt.pause(0.001)
@@ -259,6 +386,7 @@ def capture_frames(
     live_preview: bool,
     preview_colormap: str,
     hotspot_thresholds: HotspotThresholdState,
+    preview_display: DisplayWindowState,
 ) -> Tuple[List[np.ndarray], List[float], float]:
     frame_queue: Queue = Queue(maxsize=8)
     capture_start_monotonic = time.monotonic()
@@ -270,6 +398,18 @@ def capture_frames(
         sigma_threshold=hotspot_thresholds.sigma_threshold,
         threshold_mode=hotspot_thresholds.threshold_mode,
     )
+    display_state = DisplayWindowState(
+        mode=preview_display.mode,
+        pct_low=preview_display.pct_low,
+        pct_high=preview_display.pct_high,
+        fixed_min_c=preview_display.fixed_min_c,
+        fixed_max_c=preview_display.fixed_max_c,
+        manual_floor_c=preview_display.manual_floor_c,
+        manual_ceiling_c=preview_display.manual_ceiling_c,
+        global_min_c=preview_display.global_min_c,
+        global_max_c=preview_display.global_max_c,
+    )
+    preview_runtime = {"last_idx": -1, "last_frame_c": None}
 
     def py_frame_callback(frame, _userptr):
         if frame.contents.data_bytes != 2 * frame.contents.width * frame.contents.height:
@@ -306,6 +446,12 @@ def capture_frames(
             f"sigma={threshold_state.sigma_threshold} "
             f"mode={threshold_state.threshold_mode}"
         )
+        print(
+            "Display window: "
+            f"mode={display_state.mode} "
+            f"pct={display_state.pct_low:.1f}-{display_state.pct_high:.1f} "
+            f"fixed=({display_state.fixed_min_c},{display_state.fixed_max_c})"
+        )
         try:
             plt, fig, image, marker, text = init_live_preview(preview_colormap)
 
@@ -313,26 +459,72 @@ def capture_frames(
                 key = event.key
                 if key is None:
                     return
+                changed = False
                 if key == "[":
                     if threshold_state.absolute_threshold is not None:
                         threshold_state.absolute_threshold = max(0.0, threshold_state.absolute_threshold - 10.0)
+                        changed = True
                 elif key == "]":
                     base = threshold_state.absolute_threshold if threshold_state.absolute_threshold is not None else WILDFIRE_ABS_THRESHOLD_C
                     threshold_state.absolute_threshold = base + 10.0
+                    changed = True
                 elif key == ",":
                     if threshold_state.delta_threshold is not None:
                         threshold_state.delta_threshold = max(0.0, threshold_state.delta_threshold - 2.0)
+                        changed = True
                 elif key == ".":
                     base = threshold_state.delta_threshold if threshold_state.delta_threshold is not None else WILDFIRE_DELTA_THRESHOLD_C
                     threshold_state.delta_threshold = base + 2.0
+                    changed = True
                 elif key == "-":
                     if threshold_state.sigma_threshold is not None:
                         threshold_state.sigma_threshold = max(0.0, threshold_state.sigma_threshold - 0.25)
+                        changed = True
                 elif key in ("+", "="):
                     base = threshold_state.sigma_threshold if threshold_state.sigma_threshold is not None else 2.5
                     threshold_state.sigma_threshold = base + 0.25
+                    changed = True
                 elif key.lower() == "m":
                     threshold_state.threshold_mode = "any" if threshold_state.threshold_mode == "all" else "all"
+                    changed = True
+                elif key == "f":
+                    if preview_runtime["last_frame_c"] is not None:
+                        nudge_display_floor(display_state, preview_runtime["last_frame_c"], -1.0)
+                        changed = True
+                elif key == "F":
+                    if preview_runtime["last_frame_c"] is not None:
+                        nudge_display_floor(display_state, preview_runtime["last_frame_c"], 1.0)
+                        changed = True
+                elif key == "c":
+                    if preview_runtime["last_frame_c"] is not None:
+                        nudge_display_ceiling(display_state, preview_runtime["last_frame_c"], -1.0)
+                        changed = True
+                elif key == "C":
+                    if preview_runtime["last_frame_c"] is not None:
+                        nudge_display_ceiling(display_state, preview_runtime["last_frame_c"], 1.0)
+                        changed = True
+                elif key.lower() == "v":
+                    display_state.mode = cycle_display_mode(display_state.mode)
+                    display_state.manual_floor_c = None
+                    display_state.manual_ceiling_c = None
+                    changed = True
+                elif key.lower() == "r":
+                    display_state.manual_floor_c = None
+                    display_state.manual_ceiling_c = None
+                    changed = True
+
+                if changed and preview_runtime["last_frame_c"] is not None:
+                    update_live_preview(
+                        plt,
+                        fig,
+                        image,
+                        marker,
+                        text,
+                        int(preview_runtime["last_idx"]),
+                        preview_runtime["last_frame_c"],
+                        threshold_state,
+                        display_state,
+                    )
 
             fig.canvas.mpl_connect("key_press_event", on_key)
         except Exception as exc:
@@ -360,7 +552,25 @@ def capture_frames(
 
             if live_preview and plt is not None and fig is not None and image is not None and marker is not None and text is not None:
                 frame_celsius = raw_to_celsius(frame)
-                still_open = update_live_preview(plt, fig, image, marker, text, frame_idx, frame_celsius, threshold_state)
+                frame_min_c = float(np.min(frame_celsius))
+                frame_max_c = float(np.max(frame_celsius))
+                if display_state.global_min_c is None or frame_min_c < display_state.global_min_c:
+                    display_state.global_min_c = frame_min_c
+                if display_state.global_max_c is None or frame_max_c > display_state.global_max_c:
+                    display_state.global_max_c = frame_max_c
+                preview_runtime["last_idx"] = frame_idx
+                preview_runtime["last_frame_c"] = frame_celsius
+                still_open = update_live_preview(
+                    plt,
+                    fig,
+                    image,
+                    marker,
+                    text,
+                    frame_idx,
+                    frame_celsius,
+                    threshold_state,
+                    display_state,
+                )
                 if not still_open:
                     print("Live preview window closed; capture will continue without preview.")
                     live_preview = False
@@ -406,6 +616,36 @@ def main() -> int:
         help="Matplotlib colormap for live preview (used with --live-preview)",
     )
     parser.add_argument(
+        "--preview-display-mode",
+        choices=DISPLAY_MODE_CHOICES,
+        default="percentile",
+        help="Live preview display window mode: percentile|minmax|fixed|global",
+    )
+    parser.add_argument(
+        "--preview-display-pct-low",
+        type=float,
+        default=1.0,
+        help="Low percentile for preview-display-mode=percentile (default: 1.0)",
+    )
+    parser.add_argument(
+        "--preview-display-pct-high",
+        type=float,
+        default=99.0,
+        help="High percentile for preview-display-mode=percentile (default: 99.0)",
+    )
+    parser.add_argument(
+        "--preview-fixed-min-c",
+        type=float,
+        default=None,
+        help="Fixed display floor in Celsius for preview-display-mode=fixed",
+    )
+    parser.add_argument(
+        "--preview-fixed-max-c",
+        type=float,
+        default=None,
+        help="Fixed display ceiling in Celsius for preview-display-mode=fixed",
+    )
+    parser.add_argument(
         "--hotspot-profile",
         choices=["none", "wildfire"],
         default="wildfire",
@@ -443,6 +683,13 @@ def main() -> int:
         delta_threshold=args.hotspot_delta_threshold,
         sigma_threshold=args.hotspot_sigma_threshold,
         threshold_mode=args.hotspot_threshold_mode,
+    )
+    preview_display = build_display_state(
+        mode=args.preview_display_mode,
+        pct_low=args.preview_display_pct_low,
+        pct_high=args.preview_display_pct_high,
+        fixed_min_c=args.preview_fixed_min_c,
+        fixed_max_c=args.preview_fixed_max_c,
     )
 
     try:
@@ -510,6 +757,7 @@ def main() -> int:
                 args.live_preview,
                 args.preview_colormap,
                 hotspot_thresholds,
+                preview_display,
             )
 
             if not frames:

@@ -18,6 +18,8 @@ WILDFIRE_ABS_THRESHOLD_C = 300.0
 WILDFIRE_DELTA_THRESHOLD_C = 25.0
 WILDFIRE_SIGMA_THRESHOLD = None
 WILDFIRE_THRESHOLD_MODE = "all"
+DISPLAY_MODE_CHOICES = ("percentile", "minmax", "fixed", "global")
+DISPLAY_WINDOW_EPSILON_C = 0.01
 
 
 @dataclass
@@ -26,6 +28,133 @@ class HotspotThresholdState:
     delta_threshold: Optional[float]
     sigma_threshold: Optional[float]
     threshold_mode: str
+
+
+@dataclass
+class DisplayWindowState:
+    mode: str
+    pct_low: float
+    pct_high: float
+    fixed_min_c: Optional[float]
+    fixed_max_c: Optional[float]
+    manual_floor_c: Optional[float] = None
+    manual_ceiling_c: Optional[float] = None
+    global_min_c: Optional[float] = None
+    global_max_c: Optional[float] = None
+
+
+def clamp_percentiles(low: float, high: float) -> Tuple[float, float]:
+    low = float(np.clip(low, 0.0, 100.0))
+    high = float(np.clip(high, 0.0, 100.0))
+    if high <= low:
+        low, high = 1.0, 99.0
+    return low, high
+
+
+def ensure_valid_window(vmin: float, vmax: float) -> Tuple[float, float]:
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        return 0.0, 1.0
+    if vmax <= vmin:
+        center = 0.5 * (vmin + vmax)
+        return center - DISPLAY_WINDOW_EPSILON_C, center + DISPLAY_WINDOW_EPSILON_C
+    return float(vmin), float(vmax)
+
+
+def compute_display_window(frame: np.ndarray, state: DisplayWindowState) -> Tuple[float, float]:
+    frame_min = float(np.min(frame))
+    frame_max = float(np.max(frame))
+    pct_low, pct_high = clamp_percentiles(state.pct_low, state.pct_high)
+    pct_vmin, pct_vmax = np.percentile(frame, [pct_low, pct_high]).astype(np.float64)
+
+    if state.mode == "minmax":
+        base_vmin, base_vmax = frame_min, frame_max
+    elif state.mode == "fixed":
+        if (
+            state.fixed_min_c is not None
+            and state.fixed_max_c is not None
+            and np.isfinite(state.fixed_min_c)
+            and np.isfinite(state.fixed_max_c)
+            and state.fixed_max_c > state.fixed_min_c
+        ):
+            base_vmin, base_vmax = float(state.fixed_min_c), float(state.fixed_max_c)
+        else:
+            base_vmin, base_vmax = float(pct_vmin), float(pct_vmax)
+    elif state.mode == "global":
+        if (
+            state.global_min_c is not None
+            and state.global_max_c is not None
+            and np.isfinite(state.global_min_c)
+            and np.isfinite(state.global_max_c)
+            and state.global_max_c > state.global_min_c
+        ):
+            base_vmin, base_vmax = float(state.global_min_c), float(state.global_max_c)
+        else:
+            base_vmin, base_vmax = float(pct_vmin), float(pct_vmax)
+    else:
+        base_vmin, base_vmax = float(pct_vmin), float(pct_vmax)
+
+    vmin = float(state.manual_floor_c) if state.manual_floor_c is not None else base_vmin
+    vmax = float(state.manual_ceiling_c) if state.manual_ceiling_c is not None else base_vmax
+    return ensure_valid_window(vmin, vmax)
+
+
+def cycle_display_mode(mode: str) -> str:
+    if mode not in DISPLAY_MODE_CHOICES:
+        return DISPLAY_MODE_CHOICES[0]
+    idx = DISPLAY_MODE_CHOICES.index(mode)
+    return DISPLAY_MODE_CHOICES[(idx + 1) % len(DISPLAY_MODE_CHOICES)]
+
+
+def nudge_display_floor(state: DisplayWindowState, frame: np.ndarray, delta_c: float) -> None:
+    cur_vmin, cur_vmax = compute_display_window(frame, state)
+    base_floor = state.manual_floor_c if state.manual_floor_c is not None else cur_vmin
+    new_floor = float(base_floor + delta_c)
+    if new_floor >= cur_vmax:
+        new_floor = cur_vmax - DISPLAY_WINDOW_EPSILON_C
+    state.manual_floor_c = new_floor
+
+
+def nudge_display_ceiling(state: DisplayWindowState, frame: np.ndarray, delta_c: float) -> None:
+    cur_vmin, cur_vmax = compute_display_window(frame, state)
+    base_ceiling = state.manual_ceiling_c if state.manual_ceiling_c is not None else cur_vmax
+    new_ceiling = float(base_ceiling + delta_c)
+    if new_ceiling <= cur_vmin:
+        new_ceiling = cur_vmin + DISPLAY_WINDOW_EPSILON_C
+    state.manual_ceiling_c = new_ceiling
+
+
+def format_display_state(state: DisplayWindowState, vmin: float, vmax: float) -> str:
+    mode_text = state.mode
+    if state.mode == "percentile":
+        mode_text = f"{state.mode}({state.pct_low:.1f}-{state.pct_high:.1f}%)"
+    elif state.mode == "fixed":
+        if state.fixed_min_c is not None and state.fixed_max_c is not None:
+            mode_text = f"{state.mode}({state.fixed_min_c:.1f},{state.fixed_max_c:.1f}C)"
+        else:
+            mode_text = f"{state.mode}(fallback=percentile)"
+    return f"display={mode_text} win={vmin:.2f}-{vmax:.2f}C"
+
+
+def build_display_state(
+    mode: str,
+    pct_low: float,
+    pct_high: float,
+    fixed_min_c: Optional[float],
+    fixed_max_c: Optional[float],
+    global_min_c: Optional[float],
+    global_max_c: Optional[float],
+) -> DisplayWindowState:
+    resolved_mode = mode if mode in DISPLAY_MODE_CHOICES else "percentile"
+    resolved_pct_low, resolved_pct_high = clamp_percentiles(pct_low, pct_high)
+    return DisplayWindowState(
+        mode=resolved_mode,
+        pct_low=resolved_pct_low,
+        pct_high=resolved_pct_high,
+        fixed_min_c=fixed_min_c,
+        fixed_max_c=fixed_max_c,
+        global_min_c=global_min_c,
+        global_max_c=global_max_c,
+    )
 
 
 def resolve_hotspot_thresholds(
@@ -229,6 +358,7 @@ def playback_frames(
     coords: Sequence[Optional[Tuple[int, int]]],
     fps: float,
     colormap: str,
+    display_state: DisplayWindowState,
 ) -> None:
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.set_title("Lepton Playback (Celsius)")
@@ -251,19 +381,27 @@ def playback_frames(
     frame_maxs = frames.max(axis=(1, 2))
 
     for i in range(frames.shape[0]):
-        image.set_data(frames[i])
+        frame = frames[i]
+        image.set_data(frame)
+        vmin, vmax = compute_display_window(frame, display_state)
+        image.set_clim(vmin, vmax)
         min_c = float(frame_mins[i])
         max_c = float(frame_maxs[i])
+        display_text = format_display_state(display_state, vmin, vmax)
         if detections[i] and coords[i] is not None:
             x, y = coords[i]
             marker.set_data([x], [y])
             text.set_text(
                 f"Frame {i} | Min {min_c:.2f}°C | Max {max_c:.2f}°C\n"
-                f"Hotspot @ ({x}, {y})"
+                f"Hotspot @ ({x}, {y})\n"
+                f"{display_text}"
             )
         else:
             marker.set_data([], [])
-            text.set_text(f"Frame {i} | Min {min_c:.2f}°C | Max {max_c:.2f}°C")
+            text.set_text(
+                f"Frame {i} | Min {min_c:.2f}°C | Max {max_c:.2f}°C\n"
+                f"{display_text}"
+            )
 
         fig.canvas.draw_idle()
         if not plt.fignum_exists(fig.number):
@@ -282,6 +420,7 @@ def plot_analysis(
     min_persistence: int,
     pixel: Optional[Tuple[int, int]],
     colormap: str,
+    display_state: DisplayWindowState,
     x_seconds: Optional[np.ndarray],
     x_datetimes_local: Optional[np.ndarray],
 ) -> None:
@@ -333,7 +472,6 @@ def plot_analysis(
 
     preview_idx = int(np.argmax(maxs))
     preview_image = ax_preview.imshow(frames[preview_idx], cmap=colormap)
-    preview_image.set_clim(float(np.min(frames)), float(np.max(frames)))
     max_marker, = ax_preview.plot(
         [],
         [],
@@ -397,6 +535,17 @@ def plot_analysis(
         "detections": np.zeros(n_frames, dtype=bool),
         "coords": [None] * n_frames,
         "peak_values": np.full(n_frames, np.nan, dtype=np.float64),
+        "display": DisplayWindowState(
+            mode=display_state.mode,
+            pct_low=display_state.pct_low,
+            pct_high=display_state.pct_high,
+            fixed_min_c=display_state.fixed_min_c,
+            fixed_max_c=display_state.fixed_max_c,
+            manual_floor_c=display_state.manual_floor_c,
+            manual_ceiling_c=display_state.manual_ceiling_c,
+            global_min_c=display_state.global_min_c,
+            global_max_c=display_state.global_max_c,
+        ),
     }
 
     def recompute_detections() -> None:
@@ -437,7 +586,11 @@ def plot_analysis(
         if source_xy is not None:
             state["last_hover_xy"] = source_xy
 
-        preview_image.set_data(frames[idx])
+        frame = frames[idx]
+        preview_image.set_data(frame)
+        disp = state["display"]
+        vmin, vmax = compute_display_window(frame, disp)
+        preview_image.set_clim(vmin, vmax)
         if use_timestamps:
             local_ts = x_datetimes_local[idx]
             ts_text = local_ts.strftime("%Y-%m-%d %H:%M:%S")
@@ -449,7 +602,10 @@ def plot_analysis(
         max_y = int(max_ys[idx])
         max_temp = float(max_values[idx])
         max_marker.set_data([max_x], [max_y])
-        preview_text.set_text(f"Frame {idx} | Max {max_temp:.2f}°C")
+        preview_text.set_text(
+            f"Frame {idx} | Max {max_temp:.2f}°C\n"
+            f"{format_display_state(disp, vmin, vmax)}"
+        )
 
         detection = state["coords"][idx]
         if detection is not None:
@@ -491,9 +647,10 @@ def plot_analysis(
             f"Frame {idx} | lock={lock_text} | {hover_text}\n"
             f"{time_text}\n"
             f"{threshold_text}\n"
+            f"{format_display_state(disp, vmin, vmax)}\n"
             f"Min/Mean/Max={mins[idx]:.2f}/{means[idx]:.2f}/{maxs[idx]:.2f} °C\n"
             f"Frame max=({max_x}, {max_y}) {max_temp:.2f}°C | {detection_text}\n"
-            "Keys: [/]=abs  ,/.=delta  -/+=sigma  m=mode  n/N=persist"
+            "Keys: [/]=abs  ,/.=delta  -/+=sigma  m=mode  n/N=persist  f/F=floor  c/C=ceil  v=disp  r=reset"
         )
         fig.canvas.draw_idle()
 
@@ -531,44 +688,67 @@ def plot_analysis(
         if key is None:
             return
         thresholds = state["thresholds"]
-        changed = False
+        changed_detection = False
+        changed_display = False
 
         if key == "[":
             if thresholds.absolute_threshold is not None:
                 thresholds.absolute_threshold = max(0.0, thresholds.absolute_threshold - 10.0)
-                changed = True
+                changed_detection = True
         elif key == "]":
             base = thresholds.absolute_threshold if thresholds.absolute_threshold is not None else WILDFIRE_ABS_THRESHOLD_C
             thresholds.absolute_threshold = base + 10.0
-            changed = True
+            changed_detection = True
         elif key == ",":
             if thresholds.delta_threshold is not None:
                 thresholds.delta_threshold = max(0.0, thresholds.delta_threshold - 2.0)
-                changed = True
+                changed_detection = True
         elif key == ".":
             base = thresholds.delta_threshold if thresholds.delta_threshold is not None else WILDFIRE_DELTA_THRESHOLD_C
             thresholds.delta_threshold = base + 2.0
-            changed = True
+            changed_detection = True
         elif key == "-":
             if thresholds.sigma_threshold is not None:
                 thresholds.sigma_threshold = max(0.0, thresholds.sigma_threshold - 0.25)
-                changed = True
+                changed_detection = True
         elif key in ("+", "="):
             base = thresholds.sigma_threshold if thresholds.sigma_threshold is not None else 2.5
             thresholds.sigma_threshold = base + 0.25
-            changed = True
+            changed_detection = True
         elif key.lower() == "m":
             thresholds.threshold_mode = "any" if thresholds.threshold_mode == "all" else "all"
-            changed = True
+            changed_detection = True
         elif key == "n":
             state["min_persistence"] = max(1, state["min_persistence"] - 1)
-            changed = True
+            changed_detection = True
         elif key == "N":
             state["min_persistence"] += 1
-            changed = True
+            changed_detection = True
+        elif key == "f":
+            nudge_display_floor(state["display"], frames[state["active_idx"]], -1.0)
+            changed_display = True
+        elif key == "F":
+            nudge_display_floor(state["display"], frames[state["active_idx"]], 1.0)
+            changed_display = True
+        elif key == "c":
+            nudge_display_ceiling(state["display"], frames[state["active_idx"]], -1.0)
+            changed_display = True
+        elif key == "C":
+            nudge_display_ceiling(state["display"], frames[state["active_idx"]], 1.0)
+            changed_display = True
+        elif key.lower() == "v":
+            state["display"].mode = cycle_display_mode(state["display"].mode)
+            state["display"].manual_floor_c = None
+            state["display"].manual_ceiling_c = None
+            changed_display = True
+        elif key.lower() == "r":
+            state["display"].manual_floor_c = None
+            state["display"].manual_ceiling_c = None
+            changed_display = True
 
-        if changed:
+        if changed_detection:
             recompute_detections()
+        if changed_detection or changed_display:
             update_active_frame(state["active_idx"])
 
     fig.canvas.mpl_connect("motion_notify_event", on_motion)
@@ -603,6 +783,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-persistence", type=int, default=1, help="Minimum consecutive hotspot frames required")
     parser.add_argument("--pixel", nargs=2, type=int, metavar=("X", "Y"), help="Optional per-pixel temporal trace")
     parser.add_argument("--playback", action="store_true", help="Enable frame playback before interactive analysis")
+    parser.add_argument(
+        "--display-mode",
+        choices=DISPLAY_MODE_CHOICES,
+        default="percentile",
+        help="Thermal display window mode: percentile|minmax|fixed|global",
+    )
+    parser.add_argument(
+        "--display-pct-low",
+        type=float,
+        default=1.0,
+        help="Low percentile for display-mode=percentile (default: 1.0)",
+    )
+    parser.add_argument(
+        "--display-pct-high",
+        type=float,
+        default=99.0,
+        help="High percentile for display-mode=percentile (default: 99.0)",
+    )
+    parser.add_argument(
+        "--display-fixed-min-c",
+        type=float,
+        default=None,
+        help="Fixed display floor in Celsius for display-mode=fixed",
+    )
+    parser.add_argument(
+        "--display-fixed-max-c",
+        type=float,
+        default=None,
+        help="Fixed display ceiling in Celsius for display-mode=fixed",
+    )
     return parser.parse_args()
 
 
@@ -633,6 +843,15 @@ def main() -> int:
 
     temp_frames = raw_to_celsius(raw_frames)
     x_seconds, x_datetimes_local = build_time_axis_from_metadata(metadata, temp_frames.shape[0])
+    display_state = build_display_state(
+        mode=args.display_mode,
+        pct_low=args.display_pct_low,
+        pct_high=args.display_pct_high,
+        fixed_min_c=args.display_fixed_min_c,
+        fixed_max_c=args.display_fixed_max_c,
+        global_min_c=float(np.min(temp_frames)),
+        global_max_c=float(np.max(temp_frames)),
+    )
 
     if args.pixel is not None:
         x, y = args.pixel
@@ -691,7 +910,7 @@ def main() -> int:
     )
 
     if args.playback:
-        playback_frames(temp_frames, detections, coords, playback_fps, args.colormap)
+        playback_frames(temp_frames, detections, coords, playback_fps, args.colormap, display_state)
 
     plot_analysis(
         temp_frames,
@@ -702,6 +921,7 @@ def main() -> int:
         max(1, args.min_persistence),
         tuple(args.pixel) if args.pixel is not None else None,
         args.colormap,
+        display_state,
         x_seconds,
         x_datetimes_local,
     )
