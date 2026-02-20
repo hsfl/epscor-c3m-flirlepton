@@ -1,40 +1,21 @@
 # FLIR Lepton USB Capture Toolkit
 
-Python toolkit for capturing and analyzing FLIR Lepton thermal data over USB using `libuvc` + `ctypes`.
+Mission-focused FLIR Lepton capture and analysis using `libuvc` + `ctypes` (no OpenCV camera API path).
 
-## What Is New
+## Mission Operations Workflow
 
-This repo now includes an MVP pipeline that matches the Boson-style workflow while staying on a confirmed Lepton path (no OpenCV camera capture):
+This software is intended for early wildfire hotspot screening during aerial reconnaissance over known lightning-strike zones.
 
-- `lepton-camera.py`: capture Y16 thermal frames and save to `.npy` (optional live preview with per-frame min/max Celsius overlay)
-- `view_lepton_npy.py`: playback + hotspot analysis from `.npy` (playback now shows per-frame min/max Celsius overlay)
-- `lepton_capture_gui.py`: fast folder-based preview and rename tool for `.npy` captures
+Standard mission loop:
+1. Preflight checks and device validation.
+2. Timed capture session to `.npy` + `.json` metadata.
+3. Immediate hotspot review and threshold tuning.
+4. Archive/rename capture sets for downstream triage.
 
-Legacy scripts are still present for prior workflows.
-
-## Project Structure
-
-```text
-.
-├── lepton-camera.py            # New libuvc capture app (.npy + metadata .json)
-├── view_lepton_npy.py          # New viewer/analyzer for .npy stacks
-├── lepton_capture_gui.py       # Quick GUI preview + rename tool for capture folders
-├── readout.py                  # Legacy capture script (.npz flow)
-├── npz_viewer.py               # Legacy .npz viewer
-├── temp_viewer.py              # Legacy per-pixel average temperature heatmap
-├── binary_viewer.py            # Legacy .bin frame viewer
-├── binary_viewer_dennisM1.py   # Legacy CLI .bin frame viewer
-├── uvc-deviceinfo.py           # Device info utility
-├── uvc-radiometry.py           # Radiometry utility
-├── uvctypes.py                 # ctypes bindings/constants for libuvc
-└── libuvc/                     # libuvc source submodule
-```
-
-## Prerequisites
-
-- Python 3.8+
-- `libuvc` installed and discoverable by the system loader
-- Python packages: `numpy`, `matplotlib`
+Primary scripts:
+- `lepton-camera.py`: live capture and mission-time threshold monitoring.
+- `view_lepton_npy.py`: post-capture playback and hotspot event analysis.
+- `lepton_capture_gui.py`: quick browse/rename for captured sessions.
 
 ## Setup
 
@@ -57,159 +38,131 @@ sudo make install
 sudo ldconfig   # Linux only
 ```
 
-On macOS, `sudo` may be required to open the camera over `libusb`.
+## Preflight Checklist
 
-## Quick Start
-
-### 1) Capture a session to `.npy`
-
-Capture by frame count:
+Run these before flight ops:
 
 ```bash
-python3 lepton-camera.py --max-frames 600 --output-dir captures
+python3 uvc-deviceinfo.py
+python3 lepton-camera.py --print-device-info --max-frames 30 --output-dir captures --live-preview
 ```
 
-Capture by duration:
+Validate:
+- Device opens successfully.
+- Y16 stream is detected.
+- Preview renders stable temperature range.
+- Output files are written in `captures/`.
+
+## Capture During Mission
+
+Recommended baseline (2-minute sweep with live preview):
 
 ```bash
-python3 lepton-camera.py --duration-sec 120 --output-dir captures
+python3 lepton-camera.py \
+  --duration-sec 120 \
+  --output-dir captures \
+  --live-preview \
+  --hotspot-profile wildfire \
+  --preview-display-mode percentile \
+  --preview-colormap inferno
 ```
 
-Capture with live preview window:
+Wildfire profile defaults:
+- `abs = 300C`
+- `delta = frame_median + 25C`
+- `mode = all`
+
+Manual VID/PID override (if auto-discovery fails):
 
 ```bash
-python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview
+python3 lepton-camera.py --max-frames 300 --vid 0x1e4e --pid 0x0100 --output-dir captures
 ```
 
-`--hotspot-profile wildfire` is the default. It applies fire-focused hotspot thresholds:
-- absolute floor: `300C`
-- distinctness floor: `frame_median + 25C`
-- combine mode: `all`
+Live mission key controls (capture window):
+- `[` / `]`: adjust absolute threshold (`10C`)
+- `,` / `.`: adjust delta threshold (`2C`)
+- `-` / `+`: adjust sigma threshold (`0.25`)
+- `m`: toggle threshold mode (`any`/`all`)
+- `f` / `F`: adjust display floor
+- `c` / `C`: adjust display ceiling
+- `v`: cycle display mode
+- `r`: reset display bounds
 
-Use a different preview colormap:
+Outputs:
+- `lepton_frames_YYYYMMDD_HHMMSS_###.npy`
+- Matching metadata sidecar `.json` with timing fields (`capture_start_utc`, `frame_time_offsets_sec`).
+
+## Post-Capture Analysis
+
+Run full hotspot analysis:
 
 ```bash
-python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview --preview-colormap magma
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --playback
 ```
 
-Tune live preview thresholds on-the-fly (while preview window is focused):
-- `[` / `]`: decrease / increase absolute threshold (`10C` step)
-- `,` / `.`: decrease / increase delta-over-background threshold (`2C` step)
-- `-` / `+`: decrease / increase sigma threshold (`0.25` step)
-- `m`: toggle threshold combine mode (`any`/`all`)
-
-Manual VID/PID override:
+Mission-oriented stricter screening:
 
 ```bash
-python3 lepton-camera.py --max-frames 300 --vid 0x1e4e --pid 0x0100
+python3 view_lepton_npy.py \
+  captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy \
+  --profile wildfire \
+  --abs-threshold 320 \
+  --delta-threshold 35 \
+  --min-persistence 3 \
+  --threshold-mode all
 ```
 
-Output naming format:
-
-- `lepton_frames_YYYYMMDD_HHMMSS_001.npy`
-- sidecar metadata: same basename with `.json`
-
-### 2) View and analyze `.npy`
-
-```bash
-python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy
-```
-
-By default, analysis also uses `--profile wildfire` (`abs=300C`, `delta=25C`, `mode=all`).
-
-During playback, the overlay includes:
-
-- frame index
-- per-frame min temperature in Celsius
-- per-frame max temperature in Celsius
-- hotspot coordinates when detected
-
-Plot-only mode (skip playback):
-
-```bash
-python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --no-playback
-```
-
-With hotspot detection:
+Additional examples:
 
 ```bash
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --sigma-threshold 2.5 --min-persistence 3
-```
-
-Absolute threshold example:
-
-```bash
-python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --abs-threshold 60
-```
-
-Combined thresholding:
-
-```bash
-python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --sigma-threshold 2.0 --abs-threshold 60 --threshold-mode all
-```
-
-Fire-focused custom thresholding example:
-
-```bash
-python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --profile wildfire --abs-threshold 320 --delta-threshold 35 --min-persistence 3
-```
-
-Optional pixel trace:
-
-```bash
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --pixel 80 60
+python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --fps 8 --playback
 ```
 
-Interactive review controls (analysis figure):
+Analysis key controls (plot window):
+- `[` / `]`, `,` / `.`, `-` / `+`, `m`: threshold tuning
+- `n` / `N`: persistence tuning
+- `f` / `F`, `c` / `C`, `v`, `r`: display tuning
 
-- hover over the temporal graph to scrub frames in the preview panel
-- left-click on the graph to lock the selected frame
-- double-left-click on the graph to unlock and return to hover-follow mode
-- temporal x-axis uses local wall-clock time when metadata includes capture start + frame offsets
-- if timestamp metadata is unavailable/invalid, x-axis falls back to frame index
-- preview overlays always show the frame max pixel marker
-- preview overlays also show the threshold hotspot marker when detection is present
-- threshold controls while analysis window is focused:
-  - `[` / `]`: decrease / increase absolute threshold (`10C` step)
-  - `,` / `.`: decrease / increase delta-over-background threshold (`2C` step)
-  - `-` / `+`: decrease / increase sigma threshold (`0.25` step)
-  - `m`: toggle threshold combine mode (`any`/`all`)
-  - `n` / `N`: decrease / increase persistence length
-
-### 3) Quickly preview and rename capture files (GUI)
+## Capture Management (GUI)
 
 ```bash
 python3 lepton_capture_gui.py captures
 ```
 
-Useful controls:
+Use for rapid frame scrubbing, session-by-session comparison, and coordinated rename of `.npy` plus sidecar `.json`.
 
-- select a file in the left list to load it
-- scrub the frame slider to inspect any frame quickly
-- use Play/Pause to auto-advance frames (adjust FPS in the control row)
-- press Left/Right arrow for previous/next file
-- edit the rename box and press Enter (or click Rename)
-- when a sidecar JSON exists, it is renamed with the `.npy` automatically
-
-## CLI Help
+## CLI Reference
 
 ```bash
 python3 lepton-camera.py --help
 python3 view_lepton_npy.py --help
 ```
 
-## Notes and TODO Stubs
+High-use `lepton-camera.py` options:
+- `--duration-sec`, `--max-frames`, `--output-dir`, `--live-preview`
+- `--hotspot-profile`, `--hotspot-abs-threshold`, `--hotspot-delta-threshold`, `--hotspot-sigma-threshold`, `--hotspot-threshold-mode`
+- `--preview-display-mode`, `--preview-display-pct-low`, `--preview-display-pct-high`, `--preview-fixed-min-c`, `--preview-fixed-max-c`
 
-- GPS integration is stubbed in `view_lepton_npy.py` and marked with TODO comments.
-- Temperature conversion assumes Lepton 3.5 defaults (Radiometry ON, TLinear ON, 0.01 K), using `C = (raw / 100) - 273.15`.
-- Timeline axis uses local wall-clock time when metadata is available, otherwise frame index fallback.
+High-use `view_lepton_npy.py` options:
+- `--playback`, `--fps`, `--profile`
+- `--abs-threshold`, `--delta-threshold`, `--sigma-threshold`, `--threshold-mode`, `--min-persistence`
+- `--display-mode`, `--display-pct-low`, `--display-pct-high`, `--display-fixed-min-c`, `--display-fixed-max-c`
 
 ## Troubleshooting
 
-- `uvc_open` access denied:
-  - macOS: run with `sudo`
-  - Linux: prefer a proper `udev` rule over broad permission changes
+- `uvc_open failed` / access denied:
+  - macOS: retry with `sudo`.
+  - Linux: prefer proper `udev` rules.
 - `libuvc` load failure:
-  - confirm `sudo make install` and library loader path setup
-- No hotspots detected:
-  - lower `--sigma-threshold`, use `--abs-threshold`, or lower `--min-persistence`
+  - confirm install path and dynamic loader configuration.
+- Too many false positives:
+  - raise `--abs-threshold` and/or `--delta-threshold`, increase `--min-persistence`.
+- Missed likely hotspots:
+  - lower `--abs-threshold` or `--delta-threshold`, optionally enable `--sigma-threshold`.
+
+## Notes
+
+- Temperature conversion currently assumes Lepton 3.5 defaults (`C = raw/100 - 273.15`).
+- GPS/event geotagging paths are intentionally stubbed for future integration.

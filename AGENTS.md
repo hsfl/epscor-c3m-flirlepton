@@ -60,6 +60,57 @@ Use these first to minimize search time:
 - `rg -n "frame_time_offsets_sec|capture_start_utc|build_time_axis_from_metadata" lepton-camera.py view_lepton_npy.py`
   - Finds wall-clock timeline path.
 
+## CLI Command Cookbook (for agents)
+
+Use these command blocks first before deeper edits.
+
+Environment/bootstrap:
+
+- `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+- `git submodule update --init --recursive`
+
+Quick health checks:
+
+- `python3 uvc-deviceinfo.py`
+- `python3 lepton-camera.py --print-device-info --max-frames 30 --output-dir captures`
+- `python3 lepton-camera.py --help`
+- `python3 view_lepton_npy.py --help`
+
+Mission capture defaults:
+
+- `python3 lepton-camera.py --duration-sec 120 --output-dir captures --live-preview --hotspot-profile wildfire`
+- `python3 lepton-camera.py --max-frames 600 --output-dir captures --live-preview --preview-display-mode percentile`
+- `python3 lepton-camera.py --max-frames 300 --vid 0x1e4e --pid 0x0100 --output-dir captures`
+
+Mission analysis defaults:
+
+- `python3 view_lepton_npy.py captures/<capture>.npy --playback`
+- `python3 view_lepton_npy.py captures/<capture>.npy --profile wildfire --abs-threshold 320 --delta-threshold 35 --min-persistence 3 --threshold-mode all`
+- `python3 view_lepton_npy.py captures/<capture>.npy --sigma-threshold 2.5 --min-persistence 3`
+- `python3 view_lepton_npy.py captures/<capture>.npy --pixel 80 60`
+
+Capture inventory commands:
+
+- `ls -lt captures/*.npy | head`
+- `ls -lt captures/*.json | head`
+- `python3 lepton_capture_gui.py captures`
+
+Log/metadata inspection:
+
+- `python3 -m json.tool captures/<capture>.json | head -n 80`
+- `rg -n "capture_start_utc|frame_time_offsets_sec|estimated_fps|nominal_fps" captures/<capture>.json`
+
+Preferred search patterns in codebase:
+
+- `rg -n "argparse|add_argument|parse_args|main\\(" lepton-camera.py view_lepton_npy.py`
+- `rg -n "Keys:|key_press_event|on_key" lepton-camera.py view_lepton_npy.py`
+- `rg -n "resolve_hotspot_thresholds|WILDFIRE_|threshold_mode" lepton-camera.py view_lepton_npy.py`
+- `rg -n "raw_to_celsius|TLINEAR_SCALE|KELVIN_TO_CELSIUS_OFFSET" lepton-camera.py view_lepton_npy.py`
+
+Operational note:
+- Keep capture pipeline on `libuvc + ctypes`.
+- Do not migrate mission capture flow to OpenCV camera APIs.
+
 High-value entry points by function:
 
 - Capture pipeline (`lepton-camera.py`)
