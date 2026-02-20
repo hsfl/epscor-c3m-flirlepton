@@ -8,6 +8,7 @@ This repo now includes an MVP pipeline that matches the Boson-style workflow whi
 
 - `lepton-camera.py`: capture Y16 thermal frames and save to `.npy` (optional live preview with per-frame min/max Celsius overlay)
 - `view_lepton_npy.py`: playback + hotspot analysis from `.npy` (playback now shows per-frame min/max Celsius overlay)
+- `lepton_capture_gui.py`: fast folder-based preview and rename tool for `.npy` captures
 
 Legacy scripts are still present for prior workflows.
 
@@ -17,6 +18,7 @@ Legacy scripts are still present for prior workflows.
 .
 ├── lepton-camera.py            # New libuvc capture app (.npy + metadata .json)
 ├── view_lepton_npy.py          # New viewer/analyzer for .npy stacks
+├── lepton_capture_gui.py       # Quick GUI preview + rename tool for capture folders
 ├── readout.py                  # Legacy capture script (.npz flow)
 ├── npz_viewer.py               # Legacy .npz viewer
 ├── temp_viewer.py              # Legacy per-pixel average temperature heatmap
@@ -138,6 +140,21 @@ Optional pixel trace:
 ```bash
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --pixel 80 60
 ```
+
+### 3) Quickly preview and rename capture files (GUI)
+
+```bash
+python3 lepton_capture_gui.py captures
+```
+
+Useful controls:
+
+- select a file in the left list to load it
+- scrub the frame slider to inspect any frame quickly
+- use Play/Pause to auto-advance frames (adjust FPS in the control row)
+- press Left/Right arrow for previous/next file
+- edit the rename box and press Enter (or click Rename)
+- when a sidecar JSON exists, it is renamed with the `.npy` automatically
 
 ## CLI Help
 
