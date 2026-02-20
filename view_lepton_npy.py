@@ -3,9 +3,11 @@
 
 import argparse
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -47,6 +49,51 @@ def compute_temporal_stats(frames: np.ndarray) -> Tuple[np.ndarray, np.ndarray, 
     mins = frames.min(axis=(1, 2))
     maxs = frames.max(axis=(1, 2))
     return means, mins, maxs
+
+
+def compute_frame_max_coords(frames: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n_frames, _height, width = frames.shape
+    flat_frames = frames.reshape(n_frames, -1)
+    flat_indices = np.argmax(flat_frames, axis=1)
+    ys, xs = np.divmod(flat_indices, width)
+    values = frames[np.arange(n_frames), ys, xs]
+    return xs.astype(np.int32), ys.astype(np.int32), values.astype(np.float64)
+
+
+def build_time_axis_from_metadata(
+    metadata: Optional[dict], n_frames: int
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    if not metadata:
+        return None, None
+
+    capture_start_utc = metadata.get("capture_start_utc")
+    offsets = metadata.get("frame_time_offsets_sec")
+    if not isinstance(capture_start_utc, str) or not isinstance(offsets, list):
+        return None, None
+    if len(offsets) != n_frames:
+        return None, None
+
+    try:
+        start_utc = datetime.fromisoformat(capture_start_utc.replace("Z", "+00:00"))
+    except ValueError:
+        return None, None
+
+    if start_utc.tzinfo is None:
+        start_utc = start_utc.replace(tzinfo=timezone.utc)
+    else:
+        start_utc = start_utc.astimezone(timezone.utc)
+
+    try:
+        x_seconds = np.asarray(offsets, dtype=np.float64)
+    except (TypeError, ValueError):
+        return None, None
+
+    if x_seconds.shape != (n_frames,) or not np.isfinite(x_seconds).all():
+        return None, None
+
+    start_local = start_utc.astimezone()
+    x_datetimes_local = np.array([start_local + timedelta(seconds=float(s)) for s in x_seconds], dtype=object)
+    return x_seconds, x_datetimes_local
 
 
 def raw_to_celsius(frame: np.ndarray) -> np.ndarray:
@@ -189,11 +236,22 @@ def plot_analysis(
     mins: np.ndarray,
     maxs: np.ndarray,
     detections: np.ndarray,
+    coords: Sequence[Optional[Tuple[int, int]]],
     peak_values: np.ndarray,
     pixel: Optional[Tuple[int, int]],
     colormap: str,
+    x_seconds: Optional[np.ndarray],
+    x_datetimes_local: Optional[np.ndarray],
 ) -> None:
+    n_frames = frames.shape[0]
     hotspot_indices = np.flatnonzero(detections)
+    max_xs, max_ys, max_values = compute_frame_max_coords(frames)
+    use_timestamps = (
+        x_seconds is not None
+        and x_datetimes_local is not None
+        and x_seconds.shape == (n_frames,)
+        and x_datetimes_local.shape == (n_frames,)
+    )
 
     if pixel is None:
         fig, axes = plt.subplots(2, 1, figsize=(11, 8), constrained_layout=True)
@@ -203,34 +261,182 @@ def plot_analysis(
         ax_stats, ax_pixel, ax_preview = axes
 
     frame_idx = np.arange(frames.shape[0])
+    x_plot = frame_idx.astype(np.float64)
+    if use_timestamps:
+        x_plot = mdates.date2num(x_datetimes_local.tolist())
 
-    # TODO: Convert x-axis from frame index to human-readable capture time using start time + frame timestamps/fps.
-    ax_stats.plot(frame_idx, means, label="Mean", color="tab:blue")
-    ax_stats.plot(frame_idx, mins, label="Min", color="tab:green")
-    ax_stats.plot(frame_idx, maxs, label="Max", color="tab:orange")
+    ax_stats.plot(x_plot, means, label="Mean", color="tab:blue")
+    ax_stats.plot(x_plot, mins, label="Min", color="tab:green")
+    ax_stats.plot(x_plot, maxs, label="Max", color="tab:orange")
 
     if hotspot_indices.size > 0:
-        ax_stats.scatter(hotspot_indices, peak_values[hotspot_indices], color="red", s=20, label="Hotspot frame")
+        ax_stats.scatter(x_plot[hotspot_indices], peak_values[hotspot_indices], color="red", s=20, label="Hotspot frame")
 
     ax_stats.set_title("Temporal Statistics (Celsius)")
-    ax_stats.set_xlabel("Frame index")
+    ax_stats.set_xlabel("Local capture time (HH:MM:SS)" if use_timestamps else "Frame index")
     ax_stats.set_ylabel("Temperature (°C)")
     ax_stats.grid(True, alpha=0.3)
-    ax_stats.legend(loc="best")
+    if use_timestamps:
+        ax_stats.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        fig.autofmt_xdate(rotation=0, ha="center")
 
     if pixel is not None:
         x, y = pixel
         trace = frames[:, y, x]
-        ax_pixel.plot(frame_idx, trace, color="tab:purple")
+        ax_pixel.plot(x_plot, trace, color="tab:purple")
         ax_pixel.set_title(f"Pixel Trace (x={x}, y={y})")
-        ax_pixel.set_xlabel("Frame index")
+        ax_pixel.set_xlabel("Local capture time (HH:MM:SS)" if use_timestamps else "Frame index")
         ax_pixel.set_ylabel("Temperature (°C)")
         ax_pixel.grid(True, alpha=0.3)
+        if use_timestamps:
+            ax_pixel.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
 
     preview_idx = int(np.argmax(maxs))
-    ax_preview.imshow(frames[preview_idx], cmap=colormap)
+    preview_image = ax_preview.imshow(frames[preview_idx], cmap=colormap)
+    preview_image.set_clim(float(np.min(frames)), float(np.max(frames)))
+    max_marker, = ax_preview.plot(
+        [],
+        [],
+        marker="o",
+        linestyle="None",
+        markerfacecolor="none",
+        markeredgecolor="cyan",
+        markeredgewidth=2,
+        markersize=8,
+        label="Frame max pixel",
+    )
+    detection_marker, = ax_preview.plot(
+        [],
+        [],
+        marker="x",
+        linestyle="None",
+        color="red",
+        markeredgewidth=2,
+        markersize=9,
+        label="Threshold hotspot",
+    )
     ax_preview.set_title(f"Preview Frame (index {preview_idx})")
     ax_preview.set_axis_off()
+    ax_preview.legend(loc="upper right")
+    preview_text = ax_preview.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax_preview.transAxes,
+        va="top",
+        color="white",
+        fontsize=10,
+        bbox=dict(facecolor="black", alpha=0.55, edgecolor="none", boxstyle="round,pad=0.25"),
+    )
+
+    cursor_line = ax_stats.axvline(x_plot[preview_idx], color="black", linestyle="--", linewidth=1.2, alpha=0.5)
+    active_marker, = ax_stats.plot([], [], "ko", markerfacecolor="white", markersize=7, markeredgewidth=1.5)
+    status_text = ax_stats.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax_stats.transAxes,
+        va="top",
+        color="black",
+        fontsize=9,
+        bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", boxstyle="round,pad=0.2"),
+    )
+    ax_stats.legend(loc="best")
+
+    state = {
+        "active_idx": preview_idx,
+        "locked": False,
+        "last_hover_xy": None,
+    }
+
+    def update_active_frame(idx: int, source_xy: Optional[Tuple[float, float]] = None) -> None:
+        idx = int(np.clip(idx, 0, n_frames - 1))
+        state["active_idx"] = idx
+        if source_xy is not None:
+            state["last_hover_xy"] = source_xy
+
+        preview_image.set_data(frames[idx])
+        if use_timestamps:
+            local_ts = x_datetimes_local[idx]
+            ts_text = local_ts.strftime("%Y-%m-%d %H:%M:%S")
+            ax_preview.set_title(f"Preview Frame (index {idx}) | Local {ts_text}")
+        else:
+            ax_preview.set_title(f"Preview Frame (index {idx})")
+
+        max_x = int(max_xs[idx])
+        max_y = int(max_ys[idx])
+        max_temp = float(max_values[idx])
+        max_marker.set_data([max_x], [max_y])
+        preview_text.set_text(f"Frame {idx} | Max {max_temp:.2f}°C")
+
+        detection = coords[idx]
+        if detection is not None:
+            det_x, det_y = detection
+            detection_marker.set_data([det_x], [det_y])
+            det_temp = float(frames[idx, det_y, det_x])
+            detection_text = f"Threshold hotspot=({det_x}, {det_y}) {det_temp:.2f}°C"
+        else:
+            detection_marker.set_data([], [])
+            detection_text = "Threshold hotspot=none"
+
+        cursor_line.set_xdata([x_plot[idx], x_plot[idx]])
+        active_marker.set_data([x_plot[idx]], [maxs[idx]])
+
+        hover_xy = state["last_hover_xy"]
+        if hover_xy is None:
+            hover_text = "Graph (x,y)=n/a"
+        else:
+            hover_x, hover_y = hover_xy
+            if np.isfinite(hover_x) and np.isfinite(hover_y):
+                hover_text = f"Graph (x,y)=({hover_x:.2f}, {hover_y:.2f})"
+            else:
+                hover_text = "Graph (x,y)=n/a"
+
+        lock_text = "ON" if state["locked"] else "OFF"
+        if use_timestamps:
+            time_text = f"Local time={x_datetimes_local[idx].strftime('%Y-%m-%d %H:%M:%S')}"
+        else:
+            time_text = "Local time=n/a"
+        status_text.set_text(
+            f"Frame {idx} | lock={lock_text} | {hover_text}\n"
+            f"{time_text}\n"
+            f"Min/Mean/Max={mins[idx]:.2f}/{means[idx]:.2f}/{maxs[idx]:.2f} °C\n"
+            f"Frame max=({max_x}, {max_y}) {max_temp:.2f}°C | {detection_text}"
+        )
+        fig.canvas.draw_idle()
+
+    def x_to_index(x_value: Optional[float]) -> Optional[int]:
+        if x_value is None or not np.isfinite(x_value):
+            return None
+        if use_timestamps:
+            return int(np.argmin(np.abs(x_plot - float(x_value))))
+        return int(np.clip(np.rint(x_value), 0, n_frames - 1))
+
+    def on_motion(event) -> None:
+        if event.inaxes is not ax_stats or state["locked"]:
+            return
+        idx = x_to_index(event.xdata)
+        if idx is None:
+            return
+        y_value = float(event.ydata) if event.ydata is not None else float("nan")
+        update_active_frame(idx, source_xy=(float(event.xdata), y_value))
+
+    def on_click(event) -> None:
+        if event.inaxes is not ax_stats or event.button != 1:
+            return
+        idx = x_to_index(event.xdata)
+        if idx is None:
+            return
+        y_value = float(event.ydata) if event.ydata is not None else float("nan")
+        if event.dblclick:
+            state["locked"] = False
+        else:
+            state["locked"] = True
+        update_active_frame(idx, source_xy=(float(event.xdata), y_value))
+
+    fig.canvas.mpl_connect("motion_notify_event", on_motion)
+    fig.canvas.mpl_connect("button_press_event", on_click)
+    update_active_frame(preview_idx)
 
     plt.show()
 
@@ -280,6 +486,7 @@ def main() -> int:
     print("Conversion: assuming Lepton 3.5 TLinear ON at 0.01 K resolution.")
 
     temp_frames = raw_to_celsius(raw_frames)
+    x_seconds, x_datetimes_local = build_time_axis_from_metadata(metadata, temp_frames.shape[0])
 
     if args.pixel is not None:
         x, y = args.pixel
@@ -329,9 +536,12 @@ def main() -> int:
         mins,
         maxs,
         detections,
+        coords,
         np.nan_to_num(peak_values, nan=means),
         tuple(args.pixel) if args.pixel is not None else None,
         args.colormap,
+        x_seconds,
+        x_datetimes_local,
     )
 
     return 0

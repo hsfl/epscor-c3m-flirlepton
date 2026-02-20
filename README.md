@@ -141,6 +141,16 @@ Optional pixel trace:
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --pixel 80 60
 ```
 
+Interactive review controls (analysis figure):
+
+- hover over the temporal graph to scrub frames in the preview panel
+- left-click on the graph to lock the selected frame
+- double-left-click on the graph to unlock and return to hover-follow mode
+- temporal x-axis uses local wall-clock time when metadata includes capture start + frame offsets
+- if timestamp metadata is unavailable/invalid, x-axis falls back to frame index
+- preview overlays always show the frame max pixel marker
+- preview overlays also show the threshold hotspot marker when detection is present
+
 ### 3) Quickly preview and rename capture files (GUI)
 
 ```bash
@@ -167,7 +177,7 @@ python3 view_lepton_npy.py --help
 
 - GPS integration is stubbed in `view_lepton_npy.py` and marked with TODO comments.
 - Temperature conversion assumes Lepton 3.5 defaults (Radiometry ON, TLinear ON, 0.01 K), using `C = (raw / 100) - 273.15`.
-- Timeline axis uses frame index for now; TODO is present for real wall-clock conversion.
+- Timeline axis uses local wall-clock time when metadata is available, otherwise frame index fallback.
 
 ## Troubleshooting
 
