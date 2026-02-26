@@ -19,10 +19,17 @@ Primary scripts:
 
 ## Setup
 
+One-time setup (first install):
+
 ```bash
-cd /Users/sozodennis/Developer/epscor-c3m-flirlepton
+# 1) Go to your project folder (change this path to where you put the repo)
+cd ~/epscor-c3m-flirlepton
+
+# 2) Create and activate a Python environment
 python3 -m venv .venv
 source .venv/bin/activate
+
+# 3) Install required Python packages
 pip install -r requirements.txt
 ```
 
@@ -36,6 +43,20 @@ cmake ..
 make
 sudo make install
 sudo ldconfig   # Linux only
+```
+
+Daily start (every time you open a new terminal):
+
+```bash
+cd ~/epscor-c3m-flirlepton
+source .venv/bin/activate
+```
+
+If you are not sure where the repo is located, run:
+
+```bash
+pwd
+ls
 ```
 
 ## Preflight Checklist
@@ -98,6 +119,12 @@ Run full hotspot analysis:
 
 ```bash
 python3 view_lepton_npy.py captures/lepton_frames_YYYYMMDD_HHMMSS_001.npy --playback
+```
+
+Analyze the newest capture automatically (no filename typing):
+
+```bash
+python3 view_lepton_npy.py "$(ls -t captures/lepton_frames_*.npy | head -n 1)" --playback
 ```
 
 Mission-oriented stricter screening:
