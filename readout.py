@@ -2,7 +2,7 @@ from uvctypes import *
 import time
 import cv2
 import numpy as np
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 import platform
 import os
 
@@ -10,13 +10,9 @@ import os
 BUF_SIZE = 2
 q = Queue(BUF_SIZE)
 
-SAVE_DIR = "saved_frames_test_" + input("Enter directory number: saved_frames_test_")       # Directory to save .npz file in
-FRAME_RATE = 6                                                                              # Desired frame rate (frames per second)
-NPZ_FILE_NAME = input("Enter a file name (no spaces): ") + ".npz"
-
-# Create the directory if it doesn't exist
-if not os.path.exists(SAVE_DIR):
-   os.makedirs(SAVE_DIR)
+SAVE_DIR = None
+FRAME_RATE = 6  # Desired recording rate; the camera may deliver frames faster.
+NPZ_FILE_NAME = None
 
 # Saves frames as individual binary files
 def save_frame_to_bin(frame, index):
@@ -30,20 +26,28 @@ def save_frame_to_npz(frame_list):
     print("Successfully saved frames to " + file_path)
 
 def py_frame_callback(frame, userptr):
-   array_pointer = cast(frame.contents.data, POINTER(c_uint16 * (frame.contents.width * frame.contents.height)))
-   data = np.frombuffer(
-       array_pointer.contents, dtype=np.dtype(np.uint16)
-   ).reshape(
-       frame.contents.height, frame.contents.width
-   ).copy()
-
-
-   if frame.contents.data_bytes != (2 * frame.contents.width * frame.contents.height):
+   # Validate the native buffer BEFORE reading it: ctypes cannot protect us
+   # from reading beyond an allocation, which can terminate Python outright.
+   if not frame:
        return
-
-
-   if not q.full():
-       q.put(data)
+   native_frame = frame.contents
+   width, height = native_frame.width, native_frame.height
+   if (not native_frame.data or not width or not height
+           or native_frame.frame_format != UVC_FRAME_FORMAT_Y16
+           or native_frame.data_bytes != 2 * width * height
+           or native_frame.step not in (0, 2 * width)):
+       return
+   if q.full():
+       return
+   array_pointer = cast(native_frame.data, POINTER(c_uint16 * (width * height)))
+   # Copy before returning: libuvc owns and reuses the callback buffer.
+   data = np.frombuffer(array_pointer.contents, dtype=np.dtype('<u2')).reshape(
+       height, width
+   ).copy()
+   try:
+       q.put_nowait(data)
+   except Full:
+       pass
 
 
 PTR_PY_FRAME_CALLBACK = CFUNCTYPE(None, POINTER(uvc_frame), c_void_p)(py_frame_callback)
@@ -81,10 +85,17 @@ def print_uvc_open_error(res):
 
    print(f"uvc_open error ({res}): {err_str}")
    if platform.system() == "Darwin" and res == -3:
-       print("macOS denied USB capture access. Run with sudo, or use a signed app with USB capture entitlement.")
+       print("USB access was denied on macOS. The system UVC driver or application sandbox may prevent exclusive access; Camera privacy permission alone may not resolve it.")
 
 
 def main():
+    global SAVE_DIR, NPZ_FILE_NAME
+    SAVE_DIR = "saved_frames_test_" + input("Enter directory number: saved_frames_test_")
+    NPZ_FILE_NAME = input("Enter a file name (no spaces): ") + ".npz"
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    # A subsequent capture in this process must not reuse queued old frames.
+    while not q.empty():
+        q.get_nowait()
     ctx = POINTER(uvc_context)()
     dev = POINTER(uvc_device)()
     devh = POINTER(uvc_device_handle)()
@@ -145,20 +156,21 @@ def main():
                             try:
                                 raw_frame = q.get(timeout=0.5)
                             except Empty:
-                                continue
+                                raw_frame = None
 
-                            # Preserve original 16-bit pixels for analysis.
-                            frame_list.append(raw_frame)
-                            # save_frame_to_bin(raw_frame, frame_count)
-                            frame_count += 1
+                            if raw_frame is not None:
+                                # Preserve original 16-bit pixels for analysis.
+                                frame_list.append(raw_frame)
+                                # save_frame_to_bin(raw_frame, frame_count)
+                                frame_count += 1
 
-                            display_frame = cv2.resize(raw_frame, (1280, 960))
-                            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(display_frame)
-                            img = raw_to_8bit(display_frame)
-                            if show_temp:
-                                display_temperature(img, min_val, min_loc, (255, 0, 0))
-                                display_temperature(img, max_val, max_loc, (0, 0, 255))
-                            cv2.imshow('Lepton Radiometry', img)
+                                display_frame = cv2.resize(raw_frame, (1280, 960))
+                                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(display_frame)
+                                img = raw_to_8bit(display_frame)
+                                if show_temp:
+                                    display_temperature(img, min_val, min_loc, (255, 0, 0))
+                                    display_temperature(img, max_val, max_loc, (0, 0, 255))
+                                cv2.imshow('Lepton Radiometry', img)
 
                             key = cv2.waitKey(1) & 0xFF
                             if key == ord('t'):
@@ -179,9 +191,11 @@ def main():
                             break
                 finally:
                     libuvc.uvc_stop_streaming(devh)
-                    cv2.destroyAllWindows()
-                    if frame_list:
-                        save_frame_to_npz(frame_list)
+                    try:
+                        cv2.destroyAllWindows()
+                    finally:
+                        if frame_list:
+                            save_frame_to_npz(frame_list)
             finally:
                 libuvc.uvc_close(devh)
         finally:
