@@ -52,6 +52,8 @@ sudo ldconfig                  # Linux only
 ```
 
 > **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
+>
+> **macOS:** You must open uvctypes.py and change the file name in line 6 from `libuvc = cdll.LoadLibrary('libuvc.so')` to `libuvc = cdll.LoadLibrary('libuvc.dylib')` so that macOS can find libuvc.
 
 ---
 
@@ -89,7 +91,7 @@ python3 temp_viewer.py          # Average Temperature Values
 python3 compare_temp.py         # Average Temperature Difference 
 ```                             
 > **Directory and File Name:** Enter the target directory number and name of the npz file that you wish to get temperature data from when prompted by the terminal. For `compare_temp.py` you will be prompted to enter in a directory and file name twice, once for each data set.
-
+> **Data Set Name:** Enter a custom name for the current data set. This name will be printed to the txt file. New data sets from the same directory will be stored in the same txt file but appended to the previous data.
 > **Temperature Output:** For temp_viewer.py, you will see a heat map of the average temperature of 1 data set. For compare_temp.py, you will see a heat map of the absolute difference in temperature between your 2 data sets. Additionaly, in the terminal you will recieve the temperature difference array (120, 160) with red values having a statistically significant difference.
 
 ---
@@ -124,19 +126,29 @@ python3 compare_temp.py         # Average Temperature Difference
 ## 🛠️ Troubleshooting
 
 - **Camera open error (`uvc_open_error`)**:
+
+  **Linux**
   ```bash
-  # Linux quick test fix
+  # Temporary USB permission fix for testing only
   sudo chmod -R 777 /dev/bus/usb/
+
+  # Test camera detection and capture
   python3 uvc-deviceinfo.py
   python3 readout.py
+  ```
+  **Note:** On Linux, changing USB device permissions with `chmod 777` is an insecure temporary workaround. For regular use, configure a `udev` rule to grant access to the camera without requiring root privileges.
 
-  # macOS
+  **macOS**
+  ```bash
+  # Test camera detection and capture with elevated privileges
   sudo python3 uvc-deviceinfo.py
   sudo python3 readout.py
   ```
-  > On recent macOS releases, libusb may need root (or USB capture entitlements) to detach the UVC kernel driver.
-  >
-  > On Linux, prefer a dedicated `udev` rule for persistent access instead of `chmod 777`.
+
+  On macOS, running with `sudo` may help diagnose permission issues, but it does not guarantee access if macOS USB security restrictions are responsible.
+  ```bash
+  sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
+  ```
 
 - **macOS notes:**
   - Custom scripts (tagged `dennis`) allow additional command parameters for testing.

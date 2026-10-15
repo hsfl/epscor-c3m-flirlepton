@@ -2,10 +2,9 @@ from uvctypes import *
 import time
 import cv2
 import numpy as np
-from queue import Queue
+from queue import Queue, Empty
 import platform
 import os
-import ctypes
 
 
 BUF_SIZE = 2
@@ -86,150 +85,110 @@ def print_uvc_open_error(res):
 
 
 def main():
-   ctx = POINTER(uvc_context)()
-   dev = POINTER(uvc_device)()
-   devh = POINTER(uvc_device_handle)()
-   ctrl = uvc_stream_ctrl()
-   # Stores all frames recorded by camera
-   frame_list = []
+    ctx = POINTER(uvc_context)()
+    dev = POINTER(uvc_device)()
+    devh = POINTER(uvc_device_handle)()
+    ctrl = uvc_stream_ctrl()
+    frame_list = []
 
+    res = libuvc.uvc_init(byref(ctx), 0)
+    if res < 0:
+        print("uvc_init error")
+        return
 
-   res = libuvc.uvc_init(byref(ctx), 0)
-   if res < 0:
-       print("uvc_init error")
-       exit(1)
+    try:
+        res = libuvc.uvc_find_device(ctx, byref(dev), PT_USB_VID, PT_USB_PID, 0)
+        if res < 0:
+            print("uvc_find_device error - Couldn't find the device; is it plugged in?")
+            return
 
+        try:
+            res = libuvc.uvc_open(dev, byref(devh))
+            if res < 0:
+                print_uvc_open_error(res)
+                return
 
-   try:
-       res = libuvc.uvc_find_device(ctx, byref(dev), PT_USB_VID, PT_USB_PID, 0)
-       if res < 0:
-           print("uvc_find_device error - Couldn't find the device, is it plugged in? You should see a Cubeternet Webcam or something new once its plugged in.")
-           exit(1)
+            try:
+                print("device opened!")
+                print_device_info(devh)
+                print_device_formats(devh)
 
+                frame_formats = uvc_get_frame_formats_by_guid(devh, VS_FMT_GUID_Y16)
+                if not frame_formats:
+                    print("device does not support Y16 - required for temperature readout")
+                    return
 
-       try:
-           res = libuvc.uvc_open(dev, byref(devh))
-           print(devh)
-           if res < 0:
-               print_uvc_open_error(res)
-               exit(1)
+                fmt = frame_formats[0]
+                res = libuvc.uvc_get_stream_ctrl_format_size(
+                    devh, byref(ctrl), UVC_FRAME_FORMAT_Y16,
+                    fmt.wWidth, fmt.wHeight, int(1e7 / fmt.dwDefaultFrameInterval)
+                )
+                if res < 0:
+                    print(f"uvc_get_stream_ctrl_format_size failed: {res}")
+                    return
 
+                res = libuvc.uvc_start_streaming(
+                    devh, byref(ctrl), PTR_PY_FRAME_CALLBACK, None, 0
+                )
+                if res < 0:
+                    print(f"uvc_start_streaming failed: {res}")
+                    return
 
-           print("device opened!")
-
-
-           print_device_info(devh)
-           print_device_formats(devh)
-
-
-           frame_formats = uvc_get_frame_formats_by_guid(devh, VS_FMT_GUID_Y16)
-           if len(frame_formats) == 0:
-               print("device does not support Y16 - we need this to read out the temperatures properly")
-               exit(1)
-
-
-           libuvc.uvc_get_stream_ctrl_format_size(devh, byref(ctrl), UVC_FRAME_FORMAT_Y16,
-               frame_formats[0].wWidth, frame_formats[0].wHeight, int(1e7 / frame_formats[0].dwDefaultFrameInterval)
-           )
-           
-           q_obj = ctypes.py_object(q)
-           userptr = ctypes.cast(ctypes.pointer(q_obj), ctypes.c_void_p)
-
-
-           res = libuvc.uvc_start_streaming(devh, byref(ctrl), PTR_PY_FRAME_CALLBACK, None, 0)
-           if res < 0:
-               print("uvc_start_streaming failed: {0}".format(res))
-               exit(1)
-
-
-           try:
-               frame_count = 0
-               start_time = time.time()
-               
-               cv2.namedWindow('Lepton Radiometry', cv2.WINDOW_NORMAL) # Resizble window container
-               show_temp = True # Toggle flag for temp overlay
-
-               while True:
                 try:
-                    data = q.get(True, 500)
+                    frame_count = 0
+                    start_time = time.monotonic()
+                    cv2.namedWindow('Lepton Radiometry', cv2.WINDOW_NORMAL)
+                    show_temp = True
 
-                    if data is None:
-                        break
-                    
-                    # Uncomment line 144 to save each frame as binary files
-                    # You may also want to comment out line 213 to prevent frames from being saved as a npz file
-                    # save_frame_to_bin(data, frame_count)
-                    frame_count += 1
+                    while True:
+                        try:
+                            try:
+                                raw_frame = q.get(timeout=0.5)
+                            except Empty:
+                                continue
 
-                    frame_list.append(data)
+                            # Preserve original 16-bit pixels for analysis.
+                            frame_list.append(raw_frame)
+                            # save_frame_to_bin(raw_frame, frame_count)
+                            frame_count += 1
 
-                   # TODO: Replace per-frame .bin saving with saving all frames to a single .npz file.
-                   # Context: Instead of saving each frame as a separate binary file, accumulate frames in a list or array during acquisition.
-                   # After acquisition, use np.savez_compressed('frames.npz', frames=np.array(frame_list)) to store all frames in one compressed file.
-                   # When loading, use: data = np.load('frames.npz')['frames']
-                   # This will make data management and loading much easier for analysis.
-                   # Example:
-                   #   frame_list = []  # before loop
-                   #   ...
-                   #   frame_list.append(data)  # inside loop
-                   #   ...
-                   #   np.savez_compressed('frames.npz', frames=np.array(frame_list))  # after loop
+                            display_frame = cv2.resize(raw_frame, (1280, 960))
+                            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(display_frame)
+                            img = raw_to_8bit(display_frame)
+                            if show_temp:
+                                display_temperature(img, min_val, min_loc, (255, 0, 0))
+                                display_temperature(img, max_val, max_loc, (0, 0, 255))
+                            cv2.imshow('Lepton Radiometry', img)
 
+                            key = cv2.waitKey(1) & 0xFF
+                            if key == ord('t'):
+                                show_temp = not show_temp
+                            elif key == ord('q'):
+                                break
 
-                    # data = cv2.resize(data[:, :], (160, 120))
-                    # minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(data)
-                    # img = raw_to_8bit(data)
-                    # display_temperature(img, minVal, minLoc, (255, 0, 0))
-                    # display_temperature(img, maxVal, maxLoc, (0, 0, 255))
-                    # cv2.imshow('Lepton Radiometry', img)
-                    # cv2.waitKey(1)
+                            elapsed = time.monotonic() - start_time
+                            expected = frame_count / FRAME_RATE
+                            if elapsed < expected:
+                                time.sleep(expected - elapsed)
 
-                    data = cv2.resize(data[:, :], (1280, 960)) # Resize Image capture screen (orignial (160, 120))
-                    minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(data)
-                    img = raw_to_8bit(data)
-
-
-                    data = q_obj
-                  
-                    if show_temp: #for toggle temp
-                        display_temperature(img, minVal, minLoc, (255, 0, 0))
-                        display_temperature(img, maxVal, maxLoc, (0, 0, 255))
-                    cv2.imshow('Lepton Radiometry', img)
-                   # cv2.waitKey(1)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('t'):
-                        show_temp = not show_temp
-
-
-                    # Ensure the desired frame rate
-                    elapsed_time = time.time() - start_time
-                    expected_time = frame_count / FRAME_RATE
-                    if elapsed_time < expected_time:
-                        time.sleep(expected_time - elapsed_time)
-
-
-                    # Break if window is closed
-                    if cv2.getWindowProperty('Lepton Radiometry', cv2.WND_PROP_VISIBLE) < 1:
-                        print("Window closed by User")
-                        break
-
-                except KeyboardInterrupt:
-                    print(" Camera closed by User")
-                    break
-    
-           finally:
-               libuvc.uvc_stop_streaming(devh)
-               cv2.destroyAllWindows()
-               
-               # Comment out line 213 to prevent frames from being saved as npz file (if using .bin instead)
-               save_frame_to_npz(frame_list)
-
-       finally:
-           libuvc.uvc_unref_device(dev)
-   finally:
-       libuvc.uvc_exit(ctx)
-
+                            if cv2.getWindowProperty('Lepton Radiometry', cv2.WND_PROP_VISIBLE) < 1:
+                                print("Window closed by user")
+                                break
+                        except KeyboardInterrupt:
+                            print("Camera stopped by user")
+                            break
+                finally:
+                    libuvc.uvc_stop_streaming(devh)
+                    cv2.destroyAllWindows()
+                    if frame_list:
+                        save_frame_to_npz(frame_list)
+            finally:
+                libuvc.uvc_close(devh)
+        finally:
+            libuvc.uvc_unref_device(dev)
+    finally:
+        libuvc.uvc_exit(ctx)
 
 
 if __name__ == '__main__':
-   main()
+    main()
