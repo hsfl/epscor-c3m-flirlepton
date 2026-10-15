@@ -1,0 +1,11 @@
+# Core scientific stack
+numpy
+matplotlib
+
+# OpenCV (GUI-enabled). If you run headless (no windows), use opencv-python-headless instead.
+opencv-python
+
+# ---- Optional: Python libuvc bindings ----
+# These wheels are not always available on macOS; try them and keep only if they work.
+# uvc
+# pyuvc

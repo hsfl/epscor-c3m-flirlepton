@@ -11,13 +11,16 @@ Tiny Python toolkit for streaming and saving raw thermal frames from a **FLIR Le
 ├── readout.py                  # Capture frames from Lepton and save as .npz
 ├── binary_viewer.py            # View saved frames (.bin files)
 ├── binary_viewer_dennisM1.py   # Custom viewer with CLI for macOS/testing (.bin files)
-├── npz_viewer.py               # View saved frames (.npz files) and export temperature data to txt file
+├── npz_viewer.py               # View saved frames (.npz files) 
+├── temp_viewer.py              # Averages temperature values across a single data set
+├── compare_temp.py             # Gives the difference in average temperatures between 2 data sets 
 ├── uvc-deviceinfo.py           # Device info utility
 ├── uvc-radiometry.py           # Radiometry utility
 ├── uvctypes.py                 # UVC ctypes definitions
 ├── saved_frames_test_2/        # Example output directory for frames
 ├── standard-units.yaml         # Reference data
 └── lepton_instructions.txt     # Additional notes
+
 ```
 
 ---
@@ -60,32 +63,47 @@ sudo ldconfig                  # Linux only
 2. Open a terminal in the repo root and run:
 
 ```bash
-python3 readout.py              # Start capture
-```
-> **Directory:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. The program will overwrite any file named frames.npz within the selected directory, so enter an unused number if you wish to keep any original data. 
+# Linux
+python3 readout.py
 
-3. View saved frames and export temperature data:
+# macOS
+sudo python3 readout.py         # macOS may require root for libusb/uvc_open
+```
+> **Directory and File Name:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. Enter a custom name for the npz file (do not include  spaces or .npz)
+
+3. View saved frames:
 
 ```bash
 python3 npz_viewer.py                                   # Standard viewer for .npz files
 
 # To export frames as .bin files see customization section before running these commands
-# Does not export temperature data
 python3 binary_viewer.py                                # Standard viewer for .bin files (uses default save dir)
 # OR
 python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for .bin files (macOS/testing)
 ```
-> **Directory:** Enter the directory number that has the .npz file you wish to view and record temperature data from. The temperature data will be stored in a txt file in the root repo with the same name as the directory selected. 
+> **Directory:** Enter the directory number that has the .npz file you wish to view along with the file name. 
 
+4. Analyze temperature data:
+
+```bash
+python3 temp_viewer.py          # Average Temperature Values 
+
+python3 compare_temp.py         # Average Temperature Difference 
+```                             
+> **Directory and File Name:** Enter the target directory number and name of the npz file that you wish to get temperature data from when prompted by the terminal. For `compare_temp.py` you will be prompted to enter in a directory and file name twice, once for each data set.
 > **Data Set Name:** Enter a custom name for the current data set. This name will be printed to the txt file. New data sets from the same directory will be stored in the same txt file but appended to the previous data.
+> **Temperature Output:** For temp_viewer.py, you will see a heat map of the average temperature of 1 data set. For compare_temp.py, you will see a heat map of the absolute difference in temperature between your 2 data sets. Additionaly, in the terminal you will recieve the temperature difference array (120, 160) with red values having a statistically significant difference.
+
 ---
 
 ## 🖥️ Script Details
 
 - **readout.py** — Captures frames from the Lepton and saves as `.npz` file in a custom directory
-- **npz_viewer.py** - Loads and displays frames from `.npz` file. Exports average temperature by frame to `.txt` file.
+- **npz_viewer.py** - Loads and displays frames from `.npz` file. 
 - **binary_viewer.py** — Loads and displays frames from `.bin` files. Uses the default directory (defualt: `saved_frames_test_3`). Edit `SAVE_DIR` if needed.
 - **binary_viewer_dennisM1.py** — Custom viewer with command-line argument for directory. Useful for macOS or advanced testing.
+- **temp_viewer.py** - Calculates average temerature across all frames and displays heat map.
+- **compare_temp.py** - Compares average temperature between 2 datasets and displays heat map of difference.
 - **uvc-deviceinfo.py**, **uvc-radiometry.py** — Utilities for device info and radiometry.
 
 ---
@@ -96,7 +114,7 @@ python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for 
     ```bash
     save_frame_to_bin(data, frame_count)
     ```
-    2. Comment out line 186 to prevent frames from being saved as .npz files
+    2. Comment out line 213 to prevent frames from being saved as .npz files
     ```bash
     save_frame_to_npz(frame_list)
     ```
@@ -108,18 +126,33 @@ python3 binary_viewer_dennisM1.py saved_frames_test_3   # Custom CLI viewer for 
 ## 🛠️ Troubleshooting
 
 - **Camera open error (`uvc_open_error`)**:
-  ```bash
-  sudo chmod -R 777 /dev/bus/usb/    # Temporary fix (Linux)
-  ```
-  > For production, create a dedicated `udev` rule instead of using `777` permissions.
 
+  **Linux**
+  ```bash
+  # Temporary USB permission fix for testing only
+  sudo chmod -R 777 /dev/bus/usb/
+
+  # Test camera detection and capture
+  python3 uvc-deviceinfo.py
+  python3 readout.py
+  ```
+  **Note:** On Linux, changing USB device permissions with `chmod 777` is an insecure temporary workaround. For regular use, configure a `udev` rule to grant access to the camera without requiring root privileges.
+
+  **macOS**
+  ```bash
+  # Test camera detection and capture with elevated privileges
+  sudo python3 uvc-deviceinfo.py
+  sudo python3 readout.py
+  ```
+
+  On macOS, running with `sudo` may help diagnose permission issues, but it does not guarantee access if macOS USB security restrictions are responsible.
   ```bash
   sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
   ```
 
 - **macOS notes:**
   - Custom scripts (tagged `dennis`) allow additional command parameters for testing.
-  - You may need to grant extra permissions for USB access.
+  - Camera privacy prompts may not appear for this libusb/libuvc path because it does not use AVFoundation.
 
 - **Stopping a capture:** Press **Ctrl + C** in the terminal.
 
