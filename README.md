@@ -40,7 +40,30 @@ Tiny Python toolkit for streaming and saving raw thermal frames from a **FLIR Le
 pip install numpy opencv-python matplotlib
 ```
 
-### Install libuvc (Linux/macOS)
+### macOS setup
+
+From the repository root, use a virtual environment and install the native library
+with [Homebrew](https://formulae.brew.sh/formula/libuvc):
+
+```bash
+brew install libuvc
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -c "import uvctypes; print('Loaded:', uvctypes.libuvc._name)"
+python readout.py
+```
+
+No edits to `uvctypes.py` are needed. The loader tries system discovery and the
+standard Apple Silicon (`/opt/homebrew/lib`) and Intel (`/usr/local/lib`) locations.
+Python and libuvc must use the same architecture. If multiple installations exist,
+you can select one explicitly:
+
+```bash
+LIBUVC_LIBRARY="$(brew --prefix libuvc)/lib/libuvc.dylib" .venv/bin/python readout.py
+```
+
+### Install libuvc from source (Linux or custom macOS installation)
 
 ```bash
 git clone https://github.com/libuvc/libuvc.git
@@ -53,7 +76,7 @@ sudo ldconfig                  # Linux only
 
 > **Windows:** Use the pre-built `libuvc.dll` from official releases or build with MSYS2/MinGW.
 >
-> **macOS:** You must open uvctypes.py and change the file name in line 6 from `libuvc = cdll.LoadLibrary('libuvc.so')` to `libuvc = cdll.LoadLibrary('libuvc.dylib')` so that macOS can find libuvc.
+> **macOS:** Use the setup above; do not change the library filename in the source.
 
 ---
 
@@ -66,8 +89,8 @@ sudo ldconfig                  # Linux only
 # Linux
 python3 readout.py
 
-# macOS
-sudo python3 readout.py         # macOS may require root for libusb/uvc_open
+# macOS (with .venv activated)
+python readout.py
 ```
 > **Directory and File Name:** Enter the directory number when prompted by the terminal. The frames and data from the current capture will be stored in a folder named saved_frames_test_[directory num] in the root repo. Enter a custom name for the npz file (do not include  spaces or .npz)
 
@@ -140,15 +163,34 @@ python3 compare_temp.py         # Average Temperature Difference
 
   **macOS**
   ```bash
-  # Test camera detection and capture with elevated privileges
-  sudo python3 uvc-deviceinfo.py
-  sudo python3 readout.py
+  # Test library loading and camera detection first
+  .venv/bin/python -c "import uvctypes; print(uvctypes.libuvc._name)"
+  .venv/bin/python uvc-deviceinfo.py
   ```
 
-  On macOS, running with `sudo` may help diagnose permission issues, but it does not guarantee access if macOS USB security restrictions are responsible.
-  ```bash
-  sudo DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib python3 readout.py # macOS fix- tells macOs dynamic linker where to find uvc libraries if initial search is unsuccessful
-  ```
+  Library loading failures are separate from USB permission failures. If loading
+  reports `incompatible architecture`, use a libuvc build matching your Python
+  (`.venv/bin/python -c "import platform; print(platform.machine())"`).
+  `LIBUVC_LIBRARY=/absolute/path/to/libuvc.dylib` selects a particular build.
+
+  **Do not run `sudo python readout.py`, `sudo python3 readout.py`, or an
+  equivalent command using the virtual environment interpreter on macOS.**
+  During testing on macOS Tahoe 26.4, normal execution returned
+  `uvc_open error (-3): Access denied`, while elevated capture was reported to
+  make the entire Mac restart or become unresponsive. Console logs confirmed a
+  kernel panic during that session. The exact triggering USB operation has not
+  been established.
+
+  Do not use `sudo` to bypass this access error or repeatedly retry a capture
+  that causes a system crash. Camera privacy permission alone may not resolve
+  exclusive USB access restrictions. Check macOS and camera-board firmware
+  compatibility with the vendor before attempting capture again. Python buffer
+  handling fixes do not resolve an operating-system kernel panic.
+
+  A related [upstream libusb report](https://github.com/libusb/libusb/issues/1762)
+  documents a whole-system panic when claiming a USB interface on Tahoe 26.3.1
+  with different hardware. It is a relevant lead, not confirmation of this
+  project's exact failure or a verified fix.
 
 - **macOS notes:**
   - Custom scripts (tagged `dennis`) allow additional command parameters for testing.
