@@ -3,18 +3,45 @@ from ctypes import cdll
 from ctypes.util import find_library
 import platform
 
+def _load_libuvc():
+  # An explicit path also supports custom Homebrew/source installation prefixes.
+  import os
+  override = os.environ.get("LIBUVC_LIBRARY")
+  candidates = [override] if override else [find_library("uvc")]
+  if not override:
+    if platform.system() == "Darwin":
+      candidates.extend([
+        "/opt/homebrew/lib/libuvc.dylib",
+        "/usr/local/lib/libuvc.dylib",
+        "libuvc.dylib",
+      ])
+    elif platform.system() == "Windows":
+      candidates.append("libuvc.dll")
+    else:
+      candidates.append("libuvc.so")
+  errors = []
+  for name in dict.fromkeys(candidates):
+    if not name:
+      continue
+    try:
+      return cdll.LoadLibrary(name)
+    except OSError as exc:
+      errors.append(f"{name}: {exc}")
+  raise OSError(
+    "Could not load libuvc. On macOS: brew install libuvc. "
+    "On Linux, install libuvc and run sudo ldconfig after a source install. "
+    "Python and libuvc must have matching architectures. "
+    "Set LIBUVC_LIBRARY to the full library path for a custom installation.\n"
+    + "\n".join(errors)
+  )
+
+
 try:
-  # This is for Linux - once u build and install the libuvc via make command, it will use the dynamic link path and work.
-  name = find_library("uvc")  # will resolve to e.g. "libuvc.dylib" on macOS
-  if not name:
-    raise OSError("Could not find libuvc via ctypes.util.find_library('uvc'). "
-                  "Ensure libuvc is installed and on the loader path.")
-  
-  libuvc = cdll.LoadLibrary(name)
-except OSError:
-  print("Error: could not find libuvc! Make sure you ran the 'make && sudo make install' command. If you're on Linux, also run the 'sudo ldconfig' to link the library to your path. " +
-        "If you're using macOS, make sure to change the file name in uvctypes.py (line 6) to 'libuvc.dylib'")
-  exit(1)
+  libuvc = _load_libuvc()
+except OSError as exc:
+  import sys
+  print(f"Error: {exc}", file=sys.stderr)
+  sys.exit(1)
 
 class uvc_context(Structure):
   _fields_ = [("usb_ctx", c_void_p),
